@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>정도태권도 2관 영상촬영</title>
+<style>
+:root{--bg:#0f1115;--panel:#181b22;--soft:#1f232c;--line:#2b3040;--ink:#f2f3f6;--sub:#9aa1b2;--accent:#ffcf3f;--accent-ink:#141414;--ok:#3ddc84;--danger:#ff5c5c}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f5f6f9;--panel:#fff;--soft:#eef0f5;--line:#dde1ea;--ink:#181a20;--sub:#666e80;--accent:#c98a00;--accent-ink:#fff;--ok:#1ea35a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;-webkit-tap-highlight-color:transparent;overflow-x:hidden;user-select:none;-webkit-user-select:none}
+.wrap{max-width:520px;margin:0 auto;padding:16px 16px calc(100px + env(safe-area-inset-bottom))}
+h1{font-size:19px;margin:4px 0 4px}
+.sub{font-size:12.5px;color:var(--sub);line-height:1.55;margin:0 0 12px}
+button{font-family:inherit;cursor:pointer}
+input[type=search],input[type=text],select{width:100%;background:var(--soft);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;user-select:text;-webkit-user-select:text}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 0 4px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;padding:8px 13px;border-radius:999px;border:1px solid var(--line);background:var(--soft);color:var(--ink);font-weight:700;font-size:13px}
+.tab.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tab small{opacity:.65;margin-left:3px;font-weight:600}
+.list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.grade{font-size:12px;color:var(--sub);font-weight:700;margin:10px 2px 0}
+.row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-weight:700;font-size:15px}
+.row .nm{flex:1}
+.row .go{color:var(--sub);font-size:12px;font-weight:600}
+.row .cnt{font-size:12px;color:var(--ok);font-weight:700}
+.chk{width:24px;height:24px;border-radius:7px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--accent-ink);flex:none}
+.row.on{border-color:var(--accent)}
+.row.on .chk{background:var(--accent);border-color:var(--accent)}
+.row.done{opacity:.5}
+.tag{font-size:11px;font-weight:700;color:var(--danger);border:1px solid var(--danger);border-radius:999px;padding:2px 7px}
+.empty{text-align:center;color:var(--sub);font-size:13px;padding:26px 10px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;font-size:13px;line-height:1.5}
+.box b{display:block;margin-bottom:6px}
+.btn{border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-weight:700;font-size:13.5px;background:var(--soft);color:var(--ink);width:100%;margin-top:8px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
+.btn[disabled]{opacity:.4}
+details{margin-top:18px}
+summary{color:var(--sub);font-size:13px;cursor:pointer}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:none;z-index:50}
+.bar .in{max-width:520px;margin:0 auto;display:flex;gap:8px;align-items:center}
+.bar .in .btn{margin:0}
+.bar .info{font-weight:800;font-size:14px;white-space:nowrap;margin-right:4px}
+.prog{height:8px;background:var(--soft);border-radius:999px;overflow:hidden;margin:6px 0 4px}
+.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+.mg{margin-top:14px}
+.mg h3{font-size:13px;color:var(--sub);margin:0 2px 6px}
+.nav{display:flex;gap:6px;margin-bottom:6px}
+.nav .btn{margin:0;padding:8px}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ① 출석 체크 -->
+  <section id="v-check">
+    <h1>🥋 ① 출석 체크</h1>
+    <div class="sub">이번 타임에 온 아이들을 눌러 체크하세요. 체크한 아이들만 촬영 목록에 떠요.</div>
+    <div id="missed-banner"></div>
+    <input type="search" id="search" placeholder="🔍 이름 검색" oninput="renderCheck()">
+    <div class="tabs" id="tabs"></div>
+    <div class="list" id="check-list"></div>
+    <details>
+      <summary>명단 관리</summary>
+      <div class="box">
+        <input type="text" id="add-input" placeholder="이름 입력">
+        <select id="add-grade" style="margin-top:8px"></select>
+        <button class="btn primary" onclick="addOne()">+ 추가</button>
+        <button class="btn" onclick="resetRoster()">명단 처음 상태로 되돌리기</button>
+        <div class="sub" style="margin-top:8px">이름을 길게 누르면 명단에서 삭제돼요.</div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ② 촬영 -->
+  <section id="v-shoot">
+    <h1>🎥 ② 영상촬영</h1>
+    <div class="sub" id="shoot-sub"></div>
+    <div id="dirbox"></div>
+    <div id="prog-text" style="font-weight:800;font-size:14px"></div>
+    <div class="prog"><i id="prog-bar"></i></div>
+    <div class="list" id="shoot-list"></div>
+  </section>
+
+  <!-- 못 찍은 명단 -->
+  <section id="v-missed">
+    <h1>📋 못 찍은 아이들</h1>
+    <div class="sub">다음 타임 준비를 누를 때 못 찍은 아이들이 여기 쌓여요. 나중에 촬영하면 자동으로 빠져요.</div>
+    <div id="missed-body"></div>
+  </section>
+</div>
+
+<!-- 하단 바 -->
+<div class="bar" id="bar-check"><div class="in">
+  <span class="info" id="chk-info">0명</span>
+  <button class="btn" onclick="clearChecks()" style="flex:none;width:auto;padding:11px 14px">해제</button>
+  <button class="btn primary" id="start-btn" onclick="startShoot()">영상촬영 시작 ▶</button>
+</div></div>
+<div class="bar" id="bar-shoot"><div class="in">
+  <button class="btn" onclick="backToCheck()" style="flex:none;width:auto;padding:11px 14px">← 체크 수정</button>
+  <button class="btn primary" onclick="nextSlot()">다음 타임 준비 ▶</button>
+</div></div>
+<div class="bar" id="bar-missed"><div class="in">
+  <button class="btn" onclick="go('check')">← 돌아가기</button>
+</div></div>
+
+<input type="file" id="cam" accept="video/*" capture="environment" style="display:none">
+<div id="toast"></div>
+
+<script>
+const ROSTER = {"유치부": ["김도아", "김오름", "정연아", "김시우(유치부)"], "1학년": ["김나연", "김해솔", "박윤", "배도준", "오하람", "오하율", "유다현", "육지훈", "이도훈", "이준후", "김윤찬"], "2학년": ["김나윤", "김동현", "김이준", "김정현", "류시우", "박서준", "박유민", "박하윤", "배찬우", "송소은", "신혜성", "엄태준", "오하진", "이동율", "이라율", "이상효", "이시아", "이유빈", "이주호", "정다현", "정연우", "정이도", "조예준", "지윤채", "최서은", "편소이", "허윤", "조예린", "김온유", "김서진", "강주훈"], "3학년": ["곽시연", "김민성", "김시우", "김연중", "김유찬", "김지운", "남광연", "박건", "서재윤", "신수호", "유이준", "유정우", "유준혁", "이지후", "이태양", "장연우", "최다온", "홍시우", "강시우", "김서율", "김한보리", "장라온"], "4학년": ["곽소이", "김동준", "류승우", "방서영", "상하윤", "송준호", "육지호", "윤서진", "이동윤", "이상훈", "이지우", "장수현", "표재원", "조경찬"], "5학년": ["곽리온", "김서중", "김지오", "신서우", "위연주", "장윤우", "정지우", "권자윤"], "6학년": ["김하빈", "송지혁", "양하온", "양하준", "이상호", "이아름", "이주아", "장원준", "표재영"], "중학생": ["곽아인", "이상민"]};
+const GRADES = Object.keys(ROSTER);
+const KEY='jd2_roster_v2', CNT_KEY='jd2_counts_v1', ST_KEY='jd2_state_v3';
+let data, counts={}, S={checked:[],done:[],missed:[],view:'check'};
+try{ data = JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){}
+if(!data) data = JSON.parse(JSON.stringify(ROSTER));
+try{ counts = JSON.parse(localStorage.getItem(CNT_KEY)) || {}; }catch(e){}
+try{ Object.assign(S, JSON.parse(localStorage.getItem(ST_KEY)) || {}); }catch(e){}
+if(S.view==='missed') S.view='check';
+const save=()=>{ try{ localStorage.setItem(KEY,JSON.stringify(data)); localStorage.setItem(CNT_KEY,JSON.stringify(counts)); localStorage.setItem(ST_KEY,JSON.stringify(S)); }catch(e){} };
+
+let tab='전체', cur='', dirHandle=null, pressT=null, longFired=false;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const enc=encodeURIComponent, dec=decodeURIComponent;
+const gradeOf=n=>GRADES.find(g=>(data[g]||[]).includes(n))||'';
+const allNames=()=>GRADES.flatMap(g=>data[g]||[]);
+const byRoster=(a,b)=>{ const ga=GRADES.indexOf(gradeOf(a)), gb=GRADES.indexOf(gradeOf(b)); return ga-gb || a.localeCompare(b,'ko'); };
+const isMissed=n=>S.missed.some(m=>m.n===n);
+
+function go(v){ S.view=v; save(); render(); window.scrollTo(0,0); }
+function render(){
+  ['check','shoot','missed'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
+  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else renderMissed();
+}
+
+/* ---------- ① 체크 ---------- */
+function renderCheck(){
+  const total=allNames().length;
+  $('tabs').innerHTML=['전체',...GRADES].map(g=>{
+    const n=g==='전체'?total:(data[g]||[]).length, c=(g==='전체'?S.checked:S.checked.filter(x=>gradeOf(x)===g)).length;
+    return `<button class="tab ${tab===g?'active':''}" onclick="setTab('${g}')">${g}<small>${c?c+'/':''}${n}</small></button>`;
+  }).join('');
+  $('add-grade').innerHTML=GRADES.map(g=>`<option>${g}</option>`).join('');
+  const kw=$('search').value.trim(); let html='';
+  (tab==='전체'?GRADES:[tab]).forEach(g=>{
+    const arr=(data[g]||[]).filter(n=>!kw||n.includes(kw)).sort((a,b)=>a.localeCompare(b,'ko'));
+    if(!arr.length) return;
+    if(tab==='전체') html+=`<div class="grade">${g}</div>`;
+    html+=arr.map(n=>{ const on=S.checked.includes(n);
+      return `<div class="row ${on?'on':''}" data-n="${enc(n)}" data-g="${g}"><span class="chk">${on?'✓':''}</span><span class="nm">${esc(n)}</span>${isMissed(n)?'<span class="tag">못 찍음</span>':''}</div>`; }).join('');
+  });
+  $('check-list').innerHTML=html||'<div class="empty">조건에 맞는 원생이 없어요.</div>';
+  $('chk-info').textContent=S.checked.length+'명';
+  $('start-btn').disabled=S.checked.length===0;
+  $('missed-banner').innerHTML=S.missed.length?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">못 찍은 아이 ${S.missed.length}명</b><span style="color:var(--sub)">이전 타임에서 남은 아이들이에요</span></div><button class="btn" style="width:auto;margin:0" onclick="go('missed')">보기</button></div>`:'';
+}
+function setTab(g){ tab=g; renderCheck(); }
+function clearChecks(){ if(!S.checked.length) return; if(confirm('체크를 모두 해제할까요?')){ S.checked=[]; save(); renderCheck(); } }
+
+$('check-list').addEventListener('pointerdown',e=>{
+  const r=e.target.closest('.row'); if(!r) return; longFired=false;
+  pressT=setTimeout(()=>{ longFired=true; const n=dec(r.dataset.n);
+    if(confirm(`"${n}" 을(를) 명단에서 삭제할까요?`)){ data[r.dataset.g]=data[r.dataset.g].filter(x=>x!==n); S.checked=S.checked.filter(x=>x!==n); save(); renderCheck(); } },700);
+});
+['pointerup','pointermove','pointercancel'].forEach(ev=>$('check-list').addEventListener(ev,()=>{ if(pressT){ clearTimeout(pressT); pressT=null; } }));
+$('check-list').addEventListener('click',e=>{
+  const r=e.target.closest('.row'); if(!r) return;
+  if(longFired){ longFired=false; return; }
+  const n=dec(r.dataset.n), i=S.checked.indexOf(n);
+  if(i>=0) S.checked.splice(i,1); else S.checked.push(n);
+  save(); renderCheck();
+});
+$('check-list').addEventListener('contextmenu',e=>e.preventDefault());
+
+function addOne(){
+  const v=$('add-input').value.trim(), g=$('add-grade').value; if(!v) return;
+  if(!data[g].includes(v)) data[g].push(v);
+  $('add-input').value=''; save(); renderCheck(); toast(`${v} 추가했어요`);
+}
+function resetRoster(){ if(!confirm('명단을 엑셀 기준 처음 상태로 되돌릴까요?')) return; data=JSON.parse(JSON.stringify(ROSTER)); save(); renderCheck(); }
+
+function startShoot(){
+  if(!S.checked.length) return;
+  S.done=S.done.filter(n=>S.checked.includes(n));
+  S.view='shoot'; save(); render(); window.scrollTo(0,0);
+}
+
+/* ---------- ② 촬영 ---------- */
+function renderShoot(){
+  const list=S.checked.filter(n=>allNames().includes(n));
+  const pend=list.filter(n=>!S.done.includes(n)).sort(byRoster);
+  const done=list.filter(n=>S.done.includes(n)).sort(byRoster);
+  $('shoot-sub').innerHTML=window.Android
+    ?'이름을 누르면 카메라가 열려요. 촬영 후 ✓를 누르면 갤러리의 <b>정도태권도2관 › 이름</b> 앨범에 저장돼요.'
+    :'이름을 누르면 카메라가 열려요. 촬영 후 확인을 누르면 <b>이름_날짜시각.mp4</b>로 저장돼요.';
+  $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
+  $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
+  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  let html='';
+  if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
+  else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';
+  if(done.length) html+=`<div class="grade">촬영 완료 ${done.length}명</div>`+done.map(n=>row(n,true)).join('');
+  $('shoot-list').innerHTML=html;
+}
+$('shoot-list').addEventListener('click',e=>{
+  const r=e.target.closest('.row'); if(!r) return;
+  cur=dec(r.dataset.n);
+  if(window.Android){ Android.record(cur); return; }
+  $('cam').value=''; $('cam').click();
+});
+function backToCheck(){ go('check'); }
+
+function markDone(n){
+  if(!S.done.includes(n)) S.done.push(n);
+  S.missed=S.missed.filter(m=>m.n!==n);
+  counts[n]=(counts[n]||0)+1; save(); render();
+}
+
+function nextSlot(){
+  const list=S.checked, rest=list.filter(n=>!S.done.includes(n));
+  const msg=rest.length?`아직 못 찍은 ${rest.length}명은 '못 찍은 아이들' 명단에 저장돼요.\n다음 타임을 준비할까요?`:'다음 타임을 준비할까요?';
+  if(!confirm(msg)) return;
+  const d=new Date(), p=x=>String(x).padStart(2,'0');
+  const label=`${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())} 타임`;
+  rest.forEach(n=>{ S.missed=S.missed.filter(m=>m.n!==n); S.missed.push({n,label}); });
+  S.checked=[]; S.done=[]; S.view='check'; save(); render(); window.scrollTo(0,0);
+  toast(rest.length?`${rest.length}명을 못 찍은 명단에 저장했어요`:'다음 타임을 준비하세요');
+}
+
+/* ---------- 못 찍은 명단 ---------- */
+function renderMissed(){
+  if(!S.missed.length){ $('missed-body').innerHTML='<div class="empty">못 찍은 아이가 없어요 👍</div>'; return; }
+  const groups={}; S.missed.forEach(m=>{ (groups[m.label]=groups[m.label]||[]).push(m.n); });
+  let html=Object.keys(groups).map(l=>`<div class="mg"><h3>${esc(l)} · ${groups[l].length}명</h3><div class="list" style="margin-top:0">`+
+    groups[l].sort(byRoster).map(n=>`<div class="row"><span class="nm">${esc(n)}<span style="color:var(--sub);font-weight:600;font-size:12px"> ${gradeOf(n)}</span></span><button class="go" style="background:none;border:none;color:var(--danger);font-size:16px" onclick="rmMissed('${enc(n)}')">✕</button></div>`).join('')+`</div></div>`).join('');
+  html+=`<button class="btn primary" onclick="missedToCheck()">전부 다음 체크에 추가</button>
+         <button class="btn" onclick="copyMissed()">명단 복사하기</button>
+         <button class="btn danger" onclick="clearMissed()">명단 모두 비우기</button>`;
+  $('missed-body').innerHTML=html;
+}
+function rmMissed(e){ const n=dec(e); S.missed=S.missed.filter(m=>m.n!==n); save(); renderMissed(); }
+function clearMissed(){ if(confirm('못 찍은 명단을 모두 비울까요?')){ S.missed=[]; save(); renderMissed(); } }
+function missedToCheck(){ S.missed.forEach(m=>{ if(!S.checked.includes(m.n)) S.checked.push(m.n); }); S.view='check'; save(); render(); toast('체크에 추가했어요'); }
+function copyMissed(){
+  const t=[...new Set(S.missed.map(m=>m.n))].sort(byRoster).map(n=>`${gradeOf(n)} ${n}`).join('\n');
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('복사했어요'),()=>toast('복사에 실패했어요'));
+}
+
+/* ---------- 저장 ---------- */
+function ts(){ const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+$('cam').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const ext=(f.name.split('.').pop()||'mp4').toLowerCase().replace(/[^a-z0-9]/g,'')||'mp4';
+  const fileName=`${cur}_${ts()}.${ext}`;
+  try{
+    if(dirHandle){
+      const sub=await dirHandle.getDirectoryHandle(cur,{create:true});
+      const fh=await sub.getFileHandle(fileName,{create:true});
+      const w=await fh.createWritable(); await w.write(f); await w.close();
+      toast(`${cur} 폴더에 저장했어요`);
+    }else{
+      const url=URL.createObjectURL(f);
+      const a=document.createElement('a'); a.href=url; a.download=fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+      toast(`${fileName} 저장 (다운로드 폴더)`);
+    }
+    markDone(cur);
+  }catch(err){ toast('저장 실패: '+(err.message||err)); }
+});
+window.onNativeSaved=n=>{ markDone(n); toast(`${n} 앨범에 저장했어요`); };
+window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
+
+if(window.showDirectoryPicker && !window.Android){
+  $('dirbox').innerHTML=`<div class="box"><b>📁 이름별 폴더 자동 저장 (PC)</b>저장할 폴더를 한 번 고르면 그 안에 이름별 폴더가 자동으로 만들어져요.<button class="btn primary" onclick="pickDir()">저장 폴더 선택</button><div id="dirname" class="sub" style="margin:8px 0 0"></div></div>`;
+}
+async function pickDir(){ try{ dirHandle=await showDirectoryPicker({mode:'readwrite'}); $('dirname').textContent='선택됨: '+dirHandle.name; }catch(e){} }
+function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
+render();
+</script>
+</body>
+</html>
