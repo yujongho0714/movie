@@ -31,4 +31,5 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
 }
