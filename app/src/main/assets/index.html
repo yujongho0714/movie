@@ -49,6 +49,26 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .mg h3{font-size:13px;color:var(--sub);margin:0 2px 6px}
 .nav{display:flex;gap:6px;margin-bottom:6px}
 .nav .btn{margin:0;padding:8px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:10px}
+.card{position:relative;background:var(--panel);border:2px solid var(--line);border-radius:12px;overflow:hidden}
+.card.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+.card.saved{opacity:.45}
+.card .fc{display:flex;gap:2px;background:#000}
+.card .fc img{flex:1;min-width:0;aspect-ratio:1;object-fit:cover;display:block}
+.card .fc img:first-child{flex:2}
+.card .meta{padding:6px 8px;font-size:11.5px;color:var(--sub);line-height:1.35}
+.card .meta b{color:var(--ink);font-size:12.5px}
+.card .ck{position:absolute;left:6px;top:6px;width:26px;height:26px;border-radius:8px;background:rgba(0,0,0,.55);border:2px solid #fff;color:#141414;display:flex;align-items:center;justify-content:center;font-weight:900}
+.card.on .ck{background:var(--accent);border-color:var(--accent)}
+.card .pl{position:absolute;right:6px;top:6px;border:none;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:5px 9px;font-weight:700}
+.card .nf{aspect-ratio:1.6;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:12px;background:#000}
+.card .nf img{width:100%;height:100%;object-fit:cover;opacity:.8}
+.card .lb{position:absolute;left:0;right:0;bottom:44px;text-align:center;font-weight:800;color:#fff;background:rgba(0,0,0,.6);padding:3px;font-size:13px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal.on{display:flex}
+.modal .sheet{background:var(--bg);width:100%;max-width:520px;max-height:85vh;border-radius:16px 16px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column}
+.modal .names{overflow:auto;flex:1;margin-top:8px;display:flex;flex-direction:column;gap:6px}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -60,6 +80,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <h1>🥋 ① 출석 체크</h1>
     <div class="sub">이번 타임에 온 아이들을 눌러 체크하세요. 체크한 아이들만 촬영 목록에 떠요.</div>
     <div id="missed-banner"></div>
+    <div id="sort-entry"></div>
     <input type="search" id="search" placeholder="🔍 이름 검색" oninput="renderCheck()">
     <div class="tabs" id="tabs"></div>
     <div class="list" id="check-list"></div>
@@ -85,6 +106,16 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <div class="list" id="shoot-list"></div>
   </section>
 
+  <!-- ③ 영상 분류 -->
+  <section id="v-sort">
+    <h1>📂 영상 분류</h1>
+    <div class="sub">가져온 영상마다 <b>얼굴</b>을 찾아 보여줘요. 같은 아이 영상을 모두 체크하고 이름을 고르면 <b>정도태권도2관 › 이름</b> 앨범에 저장돼요. 원본은 그대로 두고, 저장본에는 오른쪽 위에 <b>찍은 날짜</b>만 들어가요.</div>
+    <button class="btn primary" onclick="sortPick()">＋ 영상 가져오기 (여러 개 선택)</button>
+    <div id="sort-stat" class="sub" style="margin-top:8px"></div>
+    <div style="display:flex;gap:6px"><button class="btn" onclick="sortHideSaved()" id="hide-btn">저장한 영상 숨기기</button><button class="btn" onclick="sortClearAll()">목록 비우기</button></div>
+    <div class="grid" id="sort-grid"></div>
+  </section>
+
   <!-- 못 찍은 명단 -->
   <section id="v-missed">
     <h1>📋 못 찍은 아이들</h1>
@@ -103,6 +134,17 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <button class="btn" onclick="backToCheck()" style="flex:none;width:auto;padding:11px 14px">← 체크 수정</button>
   <button class="btn primary" onclick="nextSlot()">다음 타임 준비 ▶</button>
 </div></div>
+<div class="bar" id="bar-sort"><div class="in">
+  <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
+  <span class="info" id="sort-info">0개 선택</span>
+  <button class="btn primary" id="sort-name-btn" onclick="openNames()" disabled>이름 골라 저장 ▶</button>
+</div></div>
+<div class="modal" id="name-modal" onclick="if(event.target===this)closeNames()"><div class="sheet">
+  <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;font-size:15px">누구 영상인가요?</b><button class="btn" style="width:auto;margin:0;padding:6px 12px" onclick="closeNames()">닫기</button></div>
+  <input type="search" id="name-q" placeholder="🔍 이름 또는 초성 (예: ㄱㄷㅎ)" oninput="renderNames()" style="margin-top:8px">
+  <div class="tabs" id="name-tabs"></div>
+  <div class="names" id="name-list"></div>
+</div></div>
 <div class="bar" id="bar-missed"><div class="in">
   <button class="btn" onclick="go('check')">← 돌아가기</button>
 </div></div>
@@ -119,7 +161,7 @@ try{ data = JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){}
 if(!data) data = JSON.parse(JSON.stringify(ROSTER));
 try{ counts = JSON.parse(localStorage.getItem(CNT_KEY)) || {}; }catch(e){}
 try{ Object.assign(S, JSON.parse(localStorage.getItem(ST_KEY)) || {}); }catch(e){}
-if(S.view==='missed') S.view='check';
+if(S.view==='missed'||S.view==='sort') S.view='check';
 const save=()=>{ try{ localStorage.setItem(KEY,JSON.stringify(data)); localStorage.setItem(CNT_KEY,JSON.stringify(counts)); localStorage.setItem(ST_KEY,JSON.stringify(S)); }catch(e){} };
 
 let tab='전체', cur='', dirHandle=null, pressT=null, longFired=false;
@@ -133,8 +175,8 @@ const isMissed=n=>S.missed.some(m=>m.n===n);
 
 function go(v){ S.view=v; save(); render(); window.scrollTo(0,0); }
 function render(){
-  ['check','shoot','missed'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
-  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else renderMissed();
+  ['check','shoot','missed','sort'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
+  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else if(S.view==='sort') renderSort(); else renderMissed();
 }
 
 /* ---------- ① 체크 ---------- */
@@ -156,6 +198,7 @@ function renderCheck(){
   $('check-list').innerHTML=html||'<div class="empty">조건에 맞는 원생이 없어요.</div>';
   $('chk-info').textContent=S.checked.length+'명';
   $('start-btn').disabled=S.checked.length===0;
+  $('sort-entry').innerHTML=window.Android?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📂 영상 분류</b><span style="color:var(--sub)">찍어둔 영상을 얼굴 보고 이름별 앨범으로 정리</span></div><button class="btn" style="width:auto;margin:0" onclick="go('sort')">열기</button></div>`:'';
   $('missed-banner').innerHTML=S.missed.length?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">못 찍은 아이 ${S.missed.length}명</b><span style="color:var(--sub)">이전 타임에서 남은 아이들이에요</span></div><button class="btn" style="width:auto;margin:0" onclick="go('missed')">보기</button></div>`:'';
 }
 function setTab(g){ tab=g; renderCheck(); }
@@ -280,6 +323,55 @@ if(window.showDirectoryPicker && !window.Android){
   $('dirbox').innerHTML=`<div class="box"><b>📁 이름별 폴더 자동 저장 (PC)</b>저장할 폴더를 한 번 고르면 그 안에 이름별 폴더가 자동으로 만들어져요.<button class="btn primary" onclick="pickDir()">저장 폴더 선택</button><div id="dirname" class="sub" style="margin:8px 0 0"></div></div>`;
 }
 async function pickDir(){ try{ dirHandle=await showDirectoryPicker({mode:'readwrite'}); $('dirname').textContent='선택됨: '+dirHandle.name; }catch(e){} }
+/* ---------- ③ 영상 분류 ---------- */
+let SV={}, SORDER=[], SSEL=[], SWAIT=0, hideSaved=false, ntab='전체', saving=0;
+const CHO='ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const cho=s=>[...s].map(c=>{const k=c.charCodeAt(0)-0xAC00;return k>=0&&k<11172?CHO[Math.floor(k/588)]:c}).join('');
+function sortPick(){ if(window.Android) Android.pickVideos(); }
+window.onSortPicked=n=>{ SWAIT+=n; renderSortStat(); toast(n+'개 영상에서 얼굴을 찾는 중이에요'); };
+window.onSortInfo=o=>{ SWAIT=Math.max(0,SWAIT-1); if(!SV[o.id]){ SV[o.id]=o; SORDER.push(o.id); SORDER.sort((a,b)=>(SV[a].ms||0)-(SV[b].ms||0)); } renderSort(); };
+window.onSortSaved=(id,ok,left)=>{ saving=left; if(SV[id]){ if(ok) SV[id].saved=SV[id].pending; delete SV[id].pending; } renderSort(); if(!left) toast('저장을 마쳤어요'); };
+function renderSortStat(){
+  const n=SORDER.length, sv=SORDER.filter(i=>SV[i].saved).length;
+  $('sort-stat').innerHTML=(SWAIT?`🔎 얼굴 찾는 중… ${SWAIT}개 남음<br>`:'')+(saving?`💾 날짜 넣어서 저장 중… ${saving}개 남음<br>`:'')+(n?`영상 ${n}개 · 저장 완료 ${sv}개 · 찍은 시간 순서예요`:'아직 가져온 영상이 없어요');
+}
+function renderSort(){
+  if(S.view!=='sort') return;
+  renderSortStat();
+  const ids=SORDER.filter(i=>!(hideSaved&&SV[i].saved));
+  $('sort-grid').innerHTML=ids.map(i=>{ const o=SV[i], on=SSEL.includes(i);
+    const pics=o.faces&&o.faces.length?`<div class="fc">${o.faces.map(f=>`<img src="${f}">`).join('')}</div>`:`<div class="nf">${o.thumb?`<img src="${o.thumb}">`:(o.err?'열 수 없는 영상':'얼굴을 못 찾았어요')}</div>`;
+    const sec=o.dur?Math.round(o.dur/1000)+'초':'';
+    return `<div class="card ${on?'on':''} ${o.saved?'saved':''}" data-id="${i}">${pics}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${i}">▶ 보기</button>${o.saved?`<div class="lb">✓ ${esc(o.saved)}</div>`:o.pending?`<div class="lb">저장 중…</div>`:''}<div class="meta"><b>${esc(o.date||'')}</b> ${sec}<br>${esc((o.file||'').slice(0,26))}</div></div>`; }).join('');
+  $('sort-info').textContent=SSEL.length+'개 선택';
+  $('sort-name-btn').disabled=!SSEL.length;
+  $('hide-btn').textContent=hideSaved?'저장한 영상도 보기':'저장한 영상 숨기기';
+}
+$('sort-grid').addEventListener('click',e=>{
+  const pb=e.target.closest('[data-play]'); if(pb){ Android.play(pb.dataset.play); return; }
+  const c=e.target.closest('.card'); if(!c) return; const id=c.dataset.id;
+  const k=SSEL.indexOf(id); if(k>=0) SSEL.splice(k,1); else SSEL.push(id); renderSort();
+});
+function sortHideSaved(){ hideSaved=!hideSaved; renderSort(); }
+function sortClearAll(){ if(!SORDER.length||!confirm('가져온 영상 목록을 비울까요? (원본 영상은 그대로예요)')) return; SV={}; SORDER=[]; SSEL=[]; renderSort(); }
+function openNames(){ if(!SSEL.length) return; $('name-q').value=''; ntab='전체'; renderNames(); $('name-modal').classList.add('on'); }
+function closeNames(){ $('name-modal').classList.remove('on'); }
+function renderNames(){
+  $('name-tabs').innerHTML=['전체',...GRADES].map(g=>`<button class="tab ${ntab===g?'active':''}" onclick="ntab='${g}';renderNames()">${g}</button>`).join('');
+  const q=$('name-q').value.trim().replace(/\s/g,'');
+  const hit=n=>!q||n.includes(q)||cho(n).includes(q)||cho(n).startsWith(cho(q));
+  let html='';
+  (ntab==='전체'?GRADES:[ntab]).forEach(g=>{ const arr=(data[g]||[]).filter(hit).sort((a,b)=>a.localeCompare(b,'ko')); if(!arr.length) return;
+    html+=`<div class="grade">${g}</div>`+arr.map(n=>`<div class="row" data-pick="${enc(n)}"><span class="nm">${esc(n)}</span><span class="go">선택 ›</span></div>`).join(''); });
+  $('name-list').innerHTML=html||'<div class="empty">맞는 이름이 없어요</div>';
+}
+$('name-list').addEventListener('click',e=>{
+  const r=e.target.closest('[data-pick]'); if(!r) return; const n=dec(r.dataset.pick);
+  if(!confirm(`영상 ${SSEL.length}개를 "${n}" 앨범에 저장할까요?\n(원본은 그대로 두고, 날짜가 들어간 복사본을 저장해요)`)) return;
+  SSEL.forEach(i=>{ SV[i].pending=n; });
+  Android.saveTo(JSON.stringify(SSEL),n); saving+=SSEL.length; SSEL=[]; closeNames(); renderSort(); toast(`${n} 앨범에 저장을 시작했어요`);
+});
+
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
 render();
 </script>

@@ -10,8 +10,8 @@ android {
         applicationId = "kr.jungdo.video"
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     buildTypes {
@@ -27,4 +27,8 @@ android {
 
 dependencies {
     implementation("androidx.core:core:1.12.0")
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-effect:1.4.1")
+    implementation("androidx.media3:media3-common:1.4.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }
