@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
 
     // 날짜를 넣어서 저장하는 작업 줄 (한 번에 하나씩)
     private static class Job {
-        Uri src; File temp; String name; long dateMs; String id;
+        Uri src; File temp; String name; long dateMs; String id; boolean replace;
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
     private boolean working = false;
@@ -141,6 +141,17 @@ public class MainActivity extends Activity {
             main.post(new Runnable() {
                 @Override
                 public void run() {
+                    startRecord(name);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void record2(final String name, final boolean replace) {
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    prefs.edit().putBoolean("replace", replace).apply();
                     startRecord(name);
                 }
             });
@@ -251,6 +262,7 @@ public class MainActivity extends Activity {
         String path = prefs.getString("path", null);
         final String name = prefs.getString("name", "");
         long at = prefs.getLong("at", System.currentTimeMillis());
+        boolean replace = prefs.getBoolean("replace", false);
         prefs.edit().clear().apply();
         if (path == null) return;
         final File f = new File(path);
@@ -258,10 +270,17 @@ public class MainActivity extends Activity {
         Job j = new Job();
         j.name = name;
         j.dateMs = at;
+        j.replace = replace;
+        if (resultCode != RESULT_OK) {
+            // 촬영 도중 멈추거나 뒤로 가기/취소 → 저장하지 않음
+            f.delete();
+            web.evaluateJavascript("window.onNativeCanceled()", null);
+            return;
+        }
         if (f.exists() && f.length() > 0) {
             j.src = Uri.fromFile(f);
             j.temp = f;
-        } else if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+        } else if (data != null && data.getData() != null) {
             // 카메라 앱이 우리 파일을 무시하고 자기 위치에 저장한 경우 → 그 영상을 가져와서 이름 붙여 저장
             f.delete();
             j.src = data.getData();
@@ -297,7 +316,7 @@ public class MainActivity extends Activity {
             public void run() {
                 if (j.temp != null) j.temp.delete();
                 if (j.id == null) {
-                    if (ok) web.evaluateJavascript("window.onNativeSaved(" + JSONObject.quote(j.name) + ")", null);
+                    if (ok) web.evaluateJavascript("window.onNativeSaved(" + JSONObject.quote(j.name) + "," + j.replace + ")", null);
                 } else {
                     web.evaluateJavascript("window.onSortSaved(" + JSONObject.quote(j.id) + "," + ok + "," + jobs.size() + ")", null);
                 }
@@ -313,7 +332,7 @@ public class MainActivity extends Activity {
             public void run() {
                 try {
                     InputStream in = getContentResolver().openInputStream(j.src);
-                    copyToAlbum(in, j.name, j.dateMs);
+                    afterShotSaved(j, copyToAlbum(in, j.name, j.dateMs));
                     if (why != null) toast(why + " → 원본 그대로 저장했어요");
                     jobDone(j, true);
                 } catch (Exception e) {
@@ -366,7 +385,7 @@ public class MainActivity extends Activity {
                             @Override
                             public void run() {
                                 try {
-                                    copyToAlbum(new FileInputStream(out), j.name, j.dateMs);
+                                    afterShotSaved(j, copyToAlbum(new FileInputStream(out), j.name, j.dateMs));
                                     out.delete();
                                     jobDone(j, true);
                                 } catch (Exception e) {
@@ -413,7 +432,7 @@ public class MainActivity extends Activity {
         return bmp;
     }
 
-    private void copyToAlbum(InputStream in, String name, long dateMs) throws Exception {
+    private Uri copyToAlbum(InputStream in, String name, long dateMs) throws Exception {
         String safe = name.replaceAll("[\\\\/:*?\"<>|]", "_");
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date(dateMs));
 
@@ -443,6 +462,19 @@ public class MainActivity extends Activity {
         ContentValues done = new ContentValues();
         done.put(MediaStore.Video.Media.IS_PENDING, 0);
         cr.update(out, done, null, null);
+        return out;
+    }
+
+    // 촬영 저장 후: 다시 찍기면 그 이름으로 바로 전에 저장한 영상을 지움 (이 앱이 만든 영상만)
+    private void afterShotSaved(Job j, Uri saved) {
+        if (j.id != null || saved == null) return;
+        SharedPreferences sp = getSharedPreferences("saved", MODE_PRIVATE);
+        String k = "last_" + j.name;
+        String prev = sp.getString(k, null);
+        if (j.replace && prev != null && !prev.equals(saved.toString())) {
+            try { getContentResolver().delete(Uri.parse(prev), null, null); } catch (Exception ignored) {}
+        }
+        sp.edit().putString(k, saved.toString()).apply();
     }
 
     /* ====================== 영상 분류: 가져오기 + 얼굴 찾기 ====================== */

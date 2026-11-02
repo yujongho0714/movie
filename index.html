@@ -252,7 +252,13 @@ function renderShoot(){
 $('shoot-list').addEventListener('click',e=>{
   const r=e.target.closest('.row'); if(!r) return;
   cur=dec(r.dataset.n);
-  if(window.Android){ Android.record(cur); return; }
+  if(window.Android){
+    if(S.done.includes(cur)&&Android.record2){
+      const rep=confirm(`${cur} 영상을 다시 찍어요.\n\n[확인] 방금 찍은 영상은 지우고 새로 찍기\n[취소] 그대로 두고 한 개 더 찍기`);
+      Android.record2(cur,rep); return;
+    }
+    if(Android.record2){ Android.record2(cur,false); return; }
+    Android.record(cur); return; }
   $('cam').value=''; $('cam').click();
 });
 function backToCheck(){ go('check'); }
@@ -316,7 +322,7 @@ $('cam').addEventListener('change',async e=>{
     markDone(cur);
   }catch(err){ toast('저장 실패: '+(err.message||err)); }
 });
-window.onNativeSaved=n=>{ markDone(n); toast(`${n} 앨범에 저장했어요`); };
+window.onNativeSaved=(n,rep)=>{ if(rep){ if(!S.done.includes(n)) S.done.push(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
 window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
 
 if(window.showDirectoryPicker && !window.Android){
