@@ -12,6 +12,17 @@
         android:icon="@drawable/ic_launcher"
         android:label="도장 영상촬영"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="kr.jungdo.video.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
