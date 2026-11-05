@@ -83,6 +83,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <section id="v-check">
     <h1>🥋 ① 출석 체크</h1>
     <div class="sub">이번 타임에 온 아이들을 눌러 체크하세요. 체크한 아이들만 촬영 목록에 떠요.</div>
+    <div id="unshot-entry"></div>
     <div id="missed-banner"></div>
     <div id="sort-entry"></div>
     <input type="search" id="search" placeholder="🔍 이름 검색" oninput="renderCheck()">
@@ -120,6 +121,14 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <div class="grid" id="sort-grid"></div>
   </section>
 
+  <!-- 이번 달 안 찍은 명단 -->
+  <section id="v-unshot">
+    <h1>📅 월별 안 찍은 아이들</h1>
+    <div class="sub">전체 명단 중 선택한 달에 아직 촬영 기록이 없는 아이들이에요. 앱에서 촬영(✓)한 기록 기준이고, 매달 1일에 새로 시작돼요.</div>
+    <div class="nav"><button class="btn" onclick="umonMove(-1)">◀ 이전 달</button><button class="btn" id="umon-label" style="font-weight:800" disabled></button><button class="btn" onclick="umonMove(1)">다음 달 ▶</button></div>
+    <div id="unshot-body"></div>
+  </section>
+
   <!-- 못 찍은 명단 -->
   <section id="v-missed">
     <h1>📋 못 찍은 아이들</h1>
@@ -149,6 +158,10 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <div class="tabs" id="name-tabs"></div>
   <div class="names" id="name-list"></div>
 </div></div>
+<div class="bar" id="bar-unshot"><div class="in">
+  <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
+  <button class="btn primary" onclick="unshotToCheck()">안 찍은 아이들만 체크 ▶</button>
+</div></div>
 <div class="bar" id="bar-missed"><div class="in">
   <button class="btn" onclick="go('check')">← 돌아가기</button>
 </div></div>
@@ -159,14 +172,18 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 <script>
 const ROSTER = {"유치부": ["김도아", "김오름", "정연아", "김시우(유치부)"], "1학년": ["김나연", "김해솔", "박윤", "배도준", "오하람", "오하율", "유다현", "육지훈", "이도훈", "이준후", "김윤찬"], "2학년": ["김나윤", "김동현", "김이준", "김정현", "류시우", "박서준", "박유민", "박하윤", "배찬우", "송소은", "신혜성", "엄태준", "오하진", "이동율", "이라율", "이상효", "이시아", "이유빈", "이주호", "정다현", "정연우", "정이도", "조예준", "지윤채", "최서은", "편소이", "허윤", "조예린", "김온유", "김서진", "강주훈"], "3학년": ["곽시연", "김민성", "김시우", "김연중", "김유찬", "김지운", "남광연", "박건", "서재윤", "신수호", "유이준", "유정우", "유준혁", "이지후", "이태양", "장연우", "최다온", "홍시우", "강시우", "김서율", "김한보리", "장라온"], "4학년": ["곽소이", "김동준", "류승우", "방서영", "상하윤", "송준호", "육지호", "윤서진", "이동윤", "이상훈", "이지우", "장수현", "표재원", "조경찬"], "5학년": ["곽리온", "김서중", "김지오", "신서우", "위연주", "장윤우", "정지우", "권자윤"], "6학년": ["김하빈", "송지혁", "양하온", "양하준", "이상호", "이아름", "이주아", "장원준", "표재영"], "중학생": ["곽아인", "이상민"]};
 const GRADES = Object.keys(ROSTER);
-const KEY='jd2_roster_v2', CNT_KEY='jd2_counts_v1', ST_KEY='jd2_state_v3';
+const KEY='jd2_roster_v2', CNT_KEY='jd2_counts_v1', ST_KEY='jd2_state_v3', MON_KEY='jd2_month_v1';
+let MON={}; try{ MON=JSON.parse(localStorage.getItem(MON_KEY))||{}; }catch(e){}
+const monKey=(d=new Date())=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+let umon=monKey();
+function logShot(n){ const k=monKey(); (MON[k]=MON[k]||[]); if(!MON[k].includes(n)) MON[k].push(n); }
 let data, counts={}, S={checked:[],done:[],missed:[],view:'check'};
 try{ data = JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){}
 if(!data) data = JSON.parse(JSON.stringify(ROSTER));
 try{ counts = JSON.parse(localStorage.getItem(CNT_KEY)) || {}; }catch(e){}
 try{ Object.assign(S, JSON.parse(localStorage.getItem(ST_KEY)) || {}); }catch(e){}
-if(S.view==='missed'||S.view==='sort') S.view='check';
-const save=()=>{ try{ localStorage.setItem(KEY,JSON.stringify(data)); localStorage.setItem(CNT_KEY,JSON.stringify(counts)); localStorage.setItem(ST_KEY,JSON.stringify(S)); }catch(e){} };
+if(S.view==='missed'||S.view==='sort'||S.view==='unshot') S.view='check';
+const save=()=>{ try{ localStorage.setItem(KEY,JSON.stringify(data)); localStorage.setItem(CNT_KEY,JSON.stringify(counts)); localStorage.setItem(ST_KEY,JSON.stringify(S)); localStorage.setItem(MON_KEY,JSON.stringify(MON)); }catch(e){} };
 
 let tab='전체', cur='', dirHandle=null, pressT=null, longFired=false;
 const $=id=>document.getElementById(id);
@@ -179,8 +196,8 @@ const isMissed=n=>S.missed.some(m=>m.n===n);
 
 function go(v){ S.view=v; save(); render(); window.scrollTo(0,0); }
 function render(){
-  ['check','shoot','missed','sort'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
-  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else if(S.view==='sort') renderSort(); else renderMissed();
+  ['check','shoot','missed','sort','unshot'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
+  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else if(S.view==='sort') renderSort(); else if(S.view==='unshot') renderUnshot(); else renderMissed();
 }
 
 /* ---------- ① 체크 ---------- */
@@ -203,6 +220,8 @@ function renderCheck(){
   $('chk-info').textContent=S.checked.length+'명';
   $('start-btn').disabled=S.checked.length===0;
   $('sort-entry').innerHTML=window.Android?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📂 영상 분류</b><span style="color:var(--sub)">찍어둔 영상을 얼굴 보고 이름별 앨범으로 정리</span></div><button class="btn" style="width:auto;margin:0" onclick="go('sort')">열기</button></div>`:'';
+  const um=unshotList().length;
+  $('unshot-entry').innerHTML=`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📅 이번 달 안 찍은 아이들 ${um}명</b><span style="color:var(--sub)">전체 명단 중 이번 달 아직 안 찍은 아이들</span></div><button class="btn" style="width:auto;margin:0" onclick="umon=monKey();go('unshot')">보기</button></div>`;
   $('missed-banner').innerHTML=S.missed.length?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">못 찍은 아이 ${S.missed.length}명</b><span style="color:var(--sub)">이전 타임에서 남은 아이들이에요</span></div><button class="btn" style="width:auto;margin:0" onclick="go('missed')">보기</button></div>`:'';
 }
 function setTab(g){ tab=g; renderCheck(); }
@@ -270,7 +289,7 @@ function backToCheck(){ go('check'); }
 function markDone(n){
   if(!S.done.includes(n)) S.done.push(n);
   S.missed=S.missed.filter(m=>m.n!==n);
-  counts[n]=(counts[n]||0)+1; save(); render();
+  counts[n]=(counts[n]||0)+1; logShot(n); save(); render();
 }
 
 function nextSlot(){
@@ -282,6 +301,26 @@ function nextSlot(){
   rest.forEach(n=>{ S.missed=S.missed.filter(m=>m.n!==n); S.missed.push({n,label}); });
   S.checked=[]; S.done=[]; S.view='check'; save(); render(); window.scrollTo(0,0);
   toast(rest.length?`${rest.length}명을 못 찍은 명단에 저장했어요`:'다음 타임을 준비하세요');
+}
+
+/* ---------- 월별 안 찍은 명단 ---------- */
+function unshotList(k=umon){ const shot=MON[k]||[]; return allNames().filter(n=>!shot.includes(n)); }
+function umonMove(d){ const [y,m]=umon.split('-').map(Number); umon=monKey(new Date(y,m-1+d,1)); renderUnshot(); }
+function renderUnshot(){
+  const [y,m]=umon.split('-'); $('umon-label').textContent=y+'년 '+Number(m)+'월';
+  const all=allNames().length, list=unshotList(), shotN=all-list.length;
+  let html=`<div class="box"><b>${shotN} / ${all}명 촬영 완료 · 안 찍은 ${list.length}명</b>${all?`<div class="prog"><i style="width:${shotN/all*100}%"></i></div>`:''}</div>`;
+  if(!list.length) html+='<div class="empty">🎉 이번 달 전원 촬영 완료!</div>';
+  else GRADES.forEach(g=>{ const arr=list.filter(n=>(data[g]||[]).includes(n)).sort((a,b)=>a.localeCompare(b,'ko')); if(!arr.length) return;
+    html+=`<div class="grade">${g} · ${arr.length}명</div><div class="list" style="margin-top:6px">`+arr.map(n=>`<div class="row" style="padding:10px 14px"><span class="nm">${esc(n)}</span><button class="go" style="background:none;border:1px solid var(--line);border-radius:8px;padding:5px 9px;color:var(--ok)" onclick="markShotMonth('${enc(n)}')">찍음으로</button></div>`).join('')+'</div>'; });
+  html+=`<button class="btn" onclick="copyUnshot()">명단 복사하기</button>`;
+  $('unshot-body').innerHTML=html;
+}
+function markShotMonth(e){ const n=dec(e); (MON[umon]=MON[umon]||[]); if(!MON[umon].includes(n)) MON[umon].push(n); save(); renderUnshot(); }
+function unshotToCheck(){ const l=unshotList(); if(!l.length){ toast('안 찍은 아이가 없어요'); return; } S.checked=[...l]; S.done=[]; S.view='check'; save(); render(); window.scrollTo(0,0); toast(l.length+'명을 체크했어요. 영상촬영 시작을 누르세요'); }
+function copyUnshot(){
+  const t=unshotList().sort(byRoster).map(n=>`${gradeOf(n)} ${n}`).join('\n');
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('복사했어요'),()=>toast('복사에 실패했어요'));
 }
 
 /* ---------- 못 찍은 명단 ---------- */
@@ -326,7 +365,7 @@ $('cam').addEventListener('change',async e=>{
     markDone(cur);
   }catch(err){ toast('저장 실패: '+(err.message||err)); }
 });
-window.onNativeSaved=(n,rep)=>{ if(rep){ if(!S.done.includes(n)) S.done.push(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
+window.onNativeSaved=(n,rep)=>{ if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
 window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
 
 if(window.showDirectoryPicker && !window.Android){
