@@ -25,7 +25,11 @@ import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
@@ -114,6 +118,37 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "Android");
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton("확인", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) { result.confirm(); }
+                        })
+                        .setNegativeButton("취소", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) { result.cancel(); }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override public void onCancel(DialogInterface d) { result.cancel(); }
+                        })
+                        .show();
+                return true;
+            }
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton("확인", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) { result.confirm(); }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override public void onCancel(DialogInterface d) { result.cancel(); }
+                        })
+                        .show();
+                return true;
+            }
+        });
         web.loadUrl("file:///android_asset/index.html");
     }
 

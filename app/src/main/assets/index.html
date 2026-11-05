@@ -67,8 +67,12 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .card .lb{position:absolute;left:0;right:0;bottom:44px;text-align:center;font-weight:800;color:#fff;background:rgba(0,0,0,.6);padding:3px;font-size:13px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:flex-end;justify-content:center}
 .modal.on{display:flex}
-.modal .sheet{background:var(--bg);width:100%;max-width:520px;max-height:85vh;border-radius:16px 16px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column}
-.modal .names{overflow:auto;flex:1;margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.modal .sheet{background:var(--bg);width:100%;max-width:520px;max-height:85vh;max-height:85dvh;min-height:0;overflow:hidden;border-radius:16px 16px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column}
+.modal .sheet>*{flex-shrink:0}
+.modal .sheet .tabs{flex:none;min-height:46px}
+.modal .names .row{flex:none}
+.modal .sheet>.names{flex-shrink:1}
+.modal .names{overflow:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;margin-top:8px;display:flex;flex-direction:column;gap:6px}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
