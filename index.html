@@ -73,6 +73,26 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .modal .names .row{flex:none}
 .modal .sheet>.names{flex-shrink:1}
 .modal .names{overflow:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.srows{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.srow{display:flex;gap:8px;align-items:stretch;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
+.srow.saved{opacity:.45}
+.srow .sl{flex:0 0 46%;min-width:0;display:flex;flex-direction:column;gap:4px}
+.srow .sl .fc{display:flex;gap:2px;background:#000;border-radius:8px;overflow:hidden}
+.srow .sl .fc img{flex:1;min-width:0;aspect-ratio:1;object-fit:cover;display:block}
+.srow .sl .fc img:first-child{flex:2}
+.srow .sl .nf{aspect-ratio:1.6;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:11.5px;background:#000;border-radius:8px;overflow:hidden;text-align:center}
+.srow .sl .nf img{width:100%;height:100%;object-fit:cover;opacity:.8}
+.srow .sl .meta{font-size:11.5px;color:var(--sub);line-height:1.35}
+.srow .sl .meta b{color:var(--ink);font-size:12.5px}
+.srow .sr{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;position:relative}
+.srow .nmin{font-size:16px;font-weight:700;padding:11px 10px}
+.srow .nmin.bad{border-color:var(--danger)}
+.srow .nmin.ok{border-color:var(--ok)}
+.srow .acts{display:flex;gap:6px}
+.srow .acts .btn{margin:0;padding:8px 6px;font-size:12.5px}
+.srow .sg{display:flex;flex-wrap:wrap;gap:5px}
+.srow .sg button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:999px;padding:6px 10px;font-size:13px;font-weight:700}
+.srow .sv{font-size:13px;font-weight:800;color:var(--ok)}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -114,11 +134,11 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <!-- ③ 영상 분류 -->
   <section id="v-sort">
     <h1>📂 영상 분류</h1>
-    <div class="sub">가져온 영상마다 <b>얼굴</b>을 찾아 보여줘요. 같은 아이 영상을 모두 체크하고 이름을 고르면 <b>정도태권도2관 › 이름</b> 앨범에 저장돼요. 원본은 그대로 두고, 저장본에는 오른쪽 위에 <b>찍은 날짜</b>만 들어가요.</div>
+    <div class="sub">가져온 영상마다 <b>얼굴</b>을 찾아 보여줘요. 영상마다 오른쪽에 <b>이름</b>을 입력(또는 추천 이름 누르기)하고 아래 <b>일괄 저장</b>을 누르면 <b>정도태권도2관 › 이름</b> 앨범에 한 번에 저장돼요. 원본은 그대로 두고, 날짜 표시 없이 <b>원본 그대로</b> 복사해서 저장해요.</div>
     <button class="btn primary" onclick="sortPick()">＋ 영상 가져오기 (여러 개 선택)</button>
     <div id="sort-stat" class="sub" style="margin-top:8px"></div>
     <div style="display:flex;gap:6px"><button class="btn" onclick="sortHideSaved()" id="hide-btn">저장한 영상 숨기기</button><button class="btn" onclick="sortClearAll()">목록 비우기</button></div>
-    <div class="grid" id="sort-grid"></div>
+    <div class="srows" id="sort-grid"></div>
   </section>
 
   <!-- 이번 달 안 찍은 명단 -->
@@ -149,14 +169,8 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 </div></div>
 <div class="bar" id="bar-sort"><div class="in">
   <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
-  <span class="info" id="sort-info">0개 선택</span>
-  <button class="btn primary" id="sort-name-btn" onclick="openNames()" disabled>이름 골라 저장 ▶</button>
-</div></div>
-<div class="modal" id="name-modal" onclick="if(event.target===this)closeNames()"><div class="sheet">
-  <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;font-size:15px">누구 영상인가요?</b><button class="btn" style="width:auto;margin:0;padding:6px 12px" onclick="closeNames()">닫기</button></div>
-  <input type="search" id="name-q" placeholder="🔍 이름 또는 초성 (예: ㄱㄷㅎ)" oninput="renderNames()" style="margin-top:8px">
-  <div class="tabs" id="name-tabs"></div>
-  <div class="names" id="name-list"></div>
+  <span class="info" id="sort-info">0개 입력</span>
+  <button class="btn primary" id="sort-name-btn" onclick="bulkSave()" disabled>일괄 저장 ▶</button>
 </div></div>
 <div class="bar" id="bar-unshot"><div class="in">
   <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
@@ -176,6 +190,7 @@ const KEY='jd2_roster_v2', CNT_KEY='jd2_counts_v1', ST_KEY='jd2_state_v3', MON_K
 let MON={}; try{ MON=JSON.parse(localStorage.getItem(MON_KEY))||{}; }catch(e){}
 const monKey=(d=new Date())=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
 let umon=monKey();
+function logShotAt(n,ms){ const k=monKey(ms?new Date(ms):new Date()); (MON[k]=MON[k]||[]); if(!MON[k].includes(n)) MON[k].push(n); }
 function logShot(n){ const k=monKey(); (MON[k]=MON[k]||[]); if(!MON[k].includes(n)) MON[k].push(n); }
 let data, counts={}, S={checked:[],done:[],missed:[],view:'check'};
 try{ data = JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){}
@@ -379,47 +394,75 @@ const cho=s=>[...s].map(c=>{const k=c.charCodeAt(0)-0xAC00;return k>=0&&k<11172?
 function sortPick(){ if(window.Android) Android.pickVideos(); }
 window.onSortPicked=n=>{ SWAIT+=n; renderSortStat(); toast(n+'개 영상에서 얼굴을 찾는 중이에요'); };
 window.onSortInfo=o=>{ SWAIT=Math.max(0,SWAIT-1); if(!SV[o.id]){ SV[o.id]=o; SORDER.push(o.id); SORDER.sort((a,b)=>(SV[a].ms||0)-(SV[b].ms||0)); } renderSort(); };
-window.onSortSaved=(id,ok,left)=>{ saving=left; if(SV[id]){ if(ok) SV[id].saved=SV[id].pending; delete SV[id].pending; } renderSort(); if(!left) toast('저장을 마쳤어요'); };
+window.onSortSaved=(id,ok,left)=>{ saving=left; if(SV[id]){ if(ok){ SV[id].saved=SV[id].pending; logShotAt(SV[id].saved,SV[id].ms); delete SV[id].nm; save(); } delete SV[id].pending; } renderSort(); if(!left) toast('저장을 마쳤어요'); };
 function renderSortStat(){
   const n=SORDER.length, sv=SORDER.filter(i=>SV[i].saved).length;
-  $('sort-stat').innerHTML=(SWAIT?`🔎 얼굴 찾는 중… ${SWAIT}개 남음<br>`:'')+(saving?`💾 날짜 넣어서 저장 중… ${saving}개 남음<br>`:'')+(n?`영상 ${n}개 · 저장 완료 ${sv}개 · 찍은 시간 순서예요`:'아직 가져온 영상이 없어요');
+  $('sort-stat').innerHTML=(SWAIT?`🔎 얼굴 찾는 중… ${SWAIT}개 남음<br>`:'')+(saving?`💾 저장 중… ${saving}개 남음<br>`:'')+(n?`영상 ${n}개 · 저장 완료 ${sv}개 · 찍은 시간 순서예요`:'아직 가져온 영상이 없어요');
 }
+let sdirty=false;
 function renderSort(){
   if(S.view!=='sort') return;
   renderSortStat();
+  const ae=document.activeElement;
+  if(ae&&ae.classList&&ae.classList.contains('nmin')){ sdirty=true; updSortBar(); return; }
+  sdirty=false;
   const ids=SORDER.filter(i=>!(hideSaved&&SV[i].saved));
-  $('sort-grid').innerHTML=ids.map(i=>{ const o=SV[i], on=SSEL.includes(i);
+  $('sort-grid').innerHTML=ids.map(i=>{ const o=SV[i];
     const pics=o.faces&&o.faces.length?`<div class="fc">${o.faces.map(f=>`<img src="${f}">`).join('')}</div>`:`<div class="nf">${o.thumb?`<img src="${o.thumb}">`:(o.err?'열 수 없는 영상':'얼굴을 못 찾았어요')}</div>`;
     const sec=o.dur?Math.round(o.dur/1000)+'초':'';
-    return `<div class="card ${on?'on':''} ${o.saved?'saved':''}" data-id="${i}">${pics}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${i}">▶ 보기</button>${o.saved?`<div class="lb">✓ ${esc(o.saved)}</div>`:o.pending?`<div class="lb">저장 중…</div>`:''}<div class="meta"><b>${esc(o.date||'')}</b> ${sec}<br>${esc((o.file||'').slice(0,26))}</div></div>`; }).join('');
-  $('sort-info').textContent=SSEL.length+'개 선택';
-  $('sort-name-btn').disabled=!SSEL.length;
+    const nm=o.nm||'', valid=allNames().includes(nm);
+    const right=o.saved?`<div class="sv">✓ ${esc(o.saved)} 저장됨</div><button class="btn" data-play="${i}" style="margin:0;padding:8px">▶ 보기</button>`
+      :o.pending?`<div class="sv">저장 중… (${esc(o.pending)})</div>`
+      :`<input type="text" class="nmin ${nm?(valid?'ok':'bad'):''}" data-id="${i}" value="${esc(nm)}" placeholder="이름 입력" enterkeyhint="next" autocomplete="off"><div class="sg" data-sg="${i}"></div><div class="acts"><button class="btn" data-play="${i}">▶ 보기</button><button class="btn" data-same="${i}">↑ 위와 같음</button></div>`;
+    return `<div class="srow ${o.saved?'saved':''}" data-id="${i}"><div class="sl">${pics}<div class="meta"><b>${esc(o.date||'')}</b> ${sec}<br>${esc((o.file||'').slice(0,22))}</div></div><div class="sr">${right}</div></div>`; }).join('');
+  updSortBar();
   $('hide-btn').textContent=hideSaved?'저장한 영상도 보기':'저장한 영상 숨기기';
 }
-$('sort-grid').addEventListener('click',e=>{
-  const pb=e.target.closest('[data-play]'); if(pb){ Android.play(pb.dataset.play); return; }
-  const c=e.target.closest('.card'); if(!c) return; const id=c.dataset.id;
-  const k=SSEL.indexOf(id); if(k>=0) SSEL.splice(k,1); else SSEL.push(id); renderSort();
-});
-function sortHideSaved(){ hideSaved=!hideSaved; renderSort(); }
-function sortClearAll(){ if(!SORDER.length||!confirm('가져온 영상 목록을 비울까요? (원본 영상은 그대로예요)')) return; SV={}; SORDER=[]; SSEL=[]; renderSort(); }
-function openNames(){ if(!SSEL.length) return; $('name-q').value=''; ntab='전체'; renderNames(); $('name-modal').classList.add('on'); }
-function closeNames(){ $('name-modal').classList.remove('on'); }
-function renderNames(){
-  $('name-tabs').innerHTML=['전체',...GRADES].map(g=>`<button class="tab ${ntab===g?'active':''}" onclick="ntab='${g}';renderNames()">${g}</button>`).join('');
-  const q=$('name-q').value.trim().replace(/\s/g,'');
-  const hit=n=>!q||n.includes(q)||cho(n).includes(q)||cho(n).startsWith(cho(q));
-  let html='';
-  (ntab==='전체'?GRADES:[ntab]).forEach(g=>{ const arr=(data[g]||[]).filter(hit).sort((a,b)=>a.localeCompare(b,'ko')); if(!arr.length) return;
-    html+=`<div class="grade">${g}</div>`+arr.map(n=>`<div class="row" data-pick="${enc(n)}"><span class="nm">${esc(n)}</span><span class="go">선택 ›</span></div>`).join(''); });
-  $('name-list').innerHTML=html||'<div class="empty">맞는 이름이 없어요</div>';
+const sortTodo=()=>SORDER.filter(i=>!SV[i].saved&&!SV[i].pending&&SV[i].nm&&allNames().includes(SV[i].nm));
+function updSortBar(){ const n=sortTodo().length; $('sort-info').textContent=n+'개 입력'; $('sort-name-btn').disabled=!n; }
+function showSg(id){
+  const el=document.querySelector(`[data-sg="${id}"]`); if(!el) return;
+  const raw=(SV[id].nm||'').trim().replace(/\s/g,'');
+  if(!raw||allNames().includes(raw)){ el.innerHTML=''; return; }
+  const hit=n=>n.includes(raw)||cho(n).startsWith(cho(raw))&&/^[ㄱ-ㅎ]+$/.test(raw);
+  const arr=allNames().filter(hit).sort(byRoster).slice(0,6);
+  el.innerHTML=arr.map(n=>`<button data-fill="${enc(n)}" data-id="${id}">${esc(n)}</button>`).join('');
 }
-$('name-list').addEventListener('click',e=>{
-  const r=e.target.closest('[data-pick]'); if(!r) return; const n=dec(r.dataset.pick);
-  if(!confirm(`영상 ${SSEL.length}개를 "${n}" 앨범에 저장할까요?\n(원본은 그대로 두고, 날짜가 들어간 복사본을 저장해요)`)) return;
-  SSEL.forEach(i=>{ SV[i].pending=n; });
-  Android.saveTo(JSON.stringify(SSEL),n); saving+=SSEL.length; SSEL=[]; closeNames(); renderSort(); toast(`${n} 앨범에 저장을 시작했어요`);
+$('sort-grid').addEventListener('input',e=>{
+  const t=e.target; if(!t.classList.contains('nmin')) return; const id=t.dataset.id;
+  SV[id].nm=t.value; const v=t.value.trim(); t.classList.toggle('ok',!!v&&allNames().includes(v)); t.classList.toggle('bad',!!v&&!allNames().includes(v));
+  showSg(id); updSortBar();
 });
+$('sort-grid').addEventListener('keydown',e=>{
+  if(e.key!=='Enter'||!e.target.classList.contains('nmin')) return; e.preventDefault();
+  const all=[...document.querySelectorAll('#sort-grid .nmin')], k=all.indexOf(e.target);
+  if(all[k+1]) all[k+1].focus(); else e.target.blur();
+});
+$('sort-grid').addEventListener('focusin',e=>{ if(e.target.classList.contains('nmin')) showSg(e.target.dataset.id); });
+$('sort-grid').addEventListener('focusout',e=>{ if(sdirty) setTimeout(()=>{ const a=document.activeElement; if(!(a&&a.classList&&a.classList.contains('nmin'))) renderSort(); },120); });
+$('sort-grid').addEventListener('pointerdown',e=>{ if(e.target.closest('[data-fill]')) e.preventDefault(); });
+$('sort-grid').addEventListener('click',e=>{
+  const f=e.target.closest('[data-fill]');
+  if(f){ const id=f.dataset.id; SV[id].nm=dec(f.dataset.fill); const inp=document.querySelector(`.nmin[data-id="${id}"]`); if(inp){ inp.value=SV[id].nm; inp.classList.add('ok'); inp.classList.remove('bad'); } showSg(id); updSortBar();
+    const all=[...document.querySelectorAll('#sort-grid .nmin')], k=all.indexOf(inp); if(all[k+1]) all[k+1].focus(); return; }
+  const s=e.target.closest('[data-same]');
+  if(s){ const id=s.dataset.same, vis=[...document.querySelectorAll('#sort-grid .srow')].map(r=>r.dataset.id), k=vis.indexOf(id);
+    let prev=''; for(let x=k-1;x>=0;x--){ const o=SV[vis[x]]; const n=o.nm||o.saved||o.pending; if(n){ prev=n; break; } }
+    if(!prev){ toast('위에 입력된 이름이 없어요'); return; }
+    SV[id].nm=prev; const inp=document.querySelector(`.nmin[data-id="${id}"]`); if(inp){ inp.value=prev; inp.className='nmin '+(allNames().includes(prev)?'ok':'bad'); } showSg(id); updSortBar(); return; }
+  const pb=e.target.closest('[data-play]'); if(pb){ Android.play(pb.dataset.play); }
+});
+function sortHideSaved(){ hideSaved=!hideSaved; sdirty=false; renderSort(); }
+function sortClearAll(){ if(!SORDER.length||!confirm('가져온 영상 목록을 비울까요? (원본 영상은 그대로예요)')) return; SV={}; SORDER=[]; renderSort(); }
+function bulkSave(){
+  const ids=sortTodo(); if(!ids.length) return;
+  const skip=SORDER.filter(i=>!SV[i].saved&&!SV[i].pending).length-ids.length;
+  const groups={}; ids.forEach(i=>{ (groups[SV[i].nm]=groups[SV[i].nm]||[]).push(i); });
+  const names=Object.keys(groups);
+  if(!confirm(`영상 ${ids.length}개를 ${names.length}명 앨범에 일괄 저장할까요?${skip>0?`\n\n(이름이 비었거나 명단에 없는 ${skip}개는 건너뛰어요)`:''}\n(원본은 그대로 두고, 날짜 표시 없이 복사본을 저장해요)`)) return;
+  names.forEach(n=>{ groups[n].forEach(i=>{ SV[i].pending=n; }); Android.saveTo(JSON.stringify(groups[n]),n); });
+  saving+=ids.length; sdirty=false; renderSort(); toast(`${ids.length}개 저장을 시작했어요`);
+}
 
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
 render();

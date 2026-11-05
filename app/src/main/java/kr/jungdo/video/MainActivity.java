@@ -337,6 +337,11 @@ public class MainActivity extends Activity {
         final Job j = jobs.poll();
         if (j == null) return;
         working = true;
+        if (j.id != null) {
+            // 영상 분류(업로드)로 정리하는 경우: 날짜 표시 없이 원본 그대로 복사 저장
+            plainSave(j, null);
+            return;
+        }
         try {
             stampAndSave(j);
         } catch (Throwable t) {
