@@ -162,6 +162,123 @@ public class MainActivity extends Activity {
             }
         });
         web.loadUrl("file:///android_asset/index.html");
+        checkUpdate();
+    }
+
+    /* ====================== 자동 업데이트 (깃허브 Releases) ====================== */
+
+    private static final String REPO = "yujongho0714/movie";
+    private File updateFile;
+
+    private long myBuild() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return pi.getLongVersionCode();
+        } catch (Exception e) { return 0; }
+    }
+
+    /** 앱을 켤 때 새 버전이 있는지 확인 → 있으면 '업데이트할까요?' */
+    private void checkUpdate() {
+        lister.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("https://api.github.com/repos/" + REPO + "/releases/latest").openConnection();
+                    c.setConnectTimeout(8000); c.setReadTimeout(8000);
+                    c.setRequestProperty("Accept", "application/vnd.github+json");
+                    if (c.getResponseCode() != 200) return;
+                    String body = new String(readAll(c.getInputStream()), "UTF-8");
+                    JSONObject o = new JSONObject(body);
+                    long latest = Long.parseLong(("0" + o.optString("tag_name", "v0").replaceAll("[^0-9]", "")));
+                    if (latest <= myBuild()) return;
+                    JSONArray assets = o.optJSONArray("assets");
+                    String url = null;
+                    if (assets != null) for (int k = 0; k < assets.length(); k++) {
+                        JSONObject a = assets.getJSONObject(k);
+                        if (a.optString("name").endsWith(".apk")) { url = a.optString("browser_download_url"); break; }
+                    }
+                    if (url == null) return;
+                    final String dl = url; final long ver = latest;
+                    main.post(new Runnable() {
+                        @Override public void run() {
+                            if (isFinishing()) return;
+                            new AlertDialog.Builder(MainActivity.this)
+                                    .setTitle("새 버전 v" + ver + " 이 있어요")
+                                    .setMessage("지금 업데이트할까요? (명단·촬영 기록은 그대로 남아요)")
+                                    .setPositiveButton("업데이트", new DialogInterface.OnClickListener() {
+                                        @Override public void onClick(DialogInterface d, int w) { downloadUpdate(dl); }
+                                    })
+                                    .setNegativeButton("나중에", null)
+                                    .show();
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    private static byte[] readAll(InputStream in) throws Exception {
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[64 * 1024];
+        int n;
+        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+        in.close();
+        return bo.toByteArray();
+    }
+
+    private void downloadUpdate(final String url) {
+        toast("새 버전 받는 중…");
+        lister.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    String u = url;
+                    java.net.HttpURLConnection c = null;
+                    for (int hop = 0; hop < 5; hop++) {   // 깃허브 → 다운로드 서버로 넘어가는 주소 따라가기
+                        c = (java.net.HttpURLConnection) new java.net.URL(u).openConnection();
+                        c.setInstanceFollowRedirects(false);
+                        c.setConnectTimeout(15000); c.setReadTimeout(60000);
+                        int code = c.getResponseCode();
+                        if (code >= 300 && code < 400 && c.getHeaderField("Location") != null) { u = c.getHeaderField("Location"); c.disconnect(); continue; }
+                        break;
+                    }
+                    File dir = new File(getCacheDir(), "updates");
+                    if (!dir.exists()) dir.mkdirs();
+                    File f = new File(dir, "jungdo-video.apk");
+                    try (InputStream in = c.getInputStream(); OutputStream out = new java.io.FileOutputStream(f)) {
+                        byte[] buf = new byte[256 * 1024];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    }
+                    updateFile = f;
+                    main.post(new Runnable() { @Override public void run() { installUpdate(); } });
+                } catch (Exception e) {
+                    toast("업데이트를 받지 못했어요: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void installUpdate() {
+        if (updateFile == null) return;
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            toast("'이 출처 허용'을 켜고 돌아오면 바로 설치돼요");
+            prefs.edit().putBoolean("installAfterPerm", true).apply();
+            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+            return;
+        }
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", updateFile);
+        Intent i = new Intent(Intent.ACTION_VIEW);
+        i.setDataAndType(uri, "application/vnd.android.package-archive");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        try { startActivity(i); } catch (Exception e) { toast("설치 화면을 열 수 없어요: " + e.getMessage()); }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (prefs != null && prefs.getBoolean("installAfterPerm", false) && getPackageManager().canRequestPackageInstalls()) {
+            prefs.edit().remove("installAfterPerm").apply();
+            installUpdate();
+        }
     }
 
     private void js(final String code) {
