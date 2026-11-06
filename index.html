@@ -93,6 +93,17 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .srow .sg{display:flex;flex-wrap:wrap;gap:5px}
 .srow .sg button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:999px;padding:6px 10px;font-size:13px;font-weight:700}
 .srow .sv{font-size:13px;font-weight:800;color:var(--ok)}
+.kgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.kc{position:relative;border:2px solid var(--line);border-radius:10px;overflow:hidden;background:#000}
+.kc.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+.kc img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.kc .ph{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:24px}
+.kc .ck{position:absolute;left:5px;top:5px;width:24px;height:24px;border-radius:7px;background:rgba(0,0,0,.55);border:2px solid #fff;color:#141414;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px}
+.kc.on .ck{background:var(--accent);border-color:var(--accent)}
+.kc .pl{position:absolute;right:5px;top:5px;border:none;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:4px 8px;font-weight:700}
+.kc .mt{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;font-size:10.5px;padding:3px 5px;line-height:1.3}
+.kk{flex:none;border:1px solid #f7e600;background:#fee500;color:#191919;border-radius:8px;padding:6px 10px;font-weight:800;font-size:13px}
+.sent{font-size:11px;font-weight:700;color:var(--ok);border:1px solid var(--ok);border-radius:999px;padding:2px 7px}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -106,6 +117,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <div id="unshot-entry"></div>
     <div id="missed-banner"></div>
     <div id="sort-entry"></div>
+    <div id="kakao-entry"></div>
     <input type="search" id="search" placeholder="🔍 이름 검색" oninput="renderCheck()">
     <div class="tabs" id="tabs"></div>
     <div class="list" id="check-list"></div>
@@ -139,6 +151,16 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <div id="sort-stat" class="sub" style="margin-top:8px"></div>
     <div style="display:flex;gap:6px"><button class="btn" onclick="sortHideSaved()" id="hide-btn">저장한 영상 숨기기</button><button class="btn" onclick="sortClearAll()">목록 비우기</button></div>
     <div class="srows" id="sort-grid"></div>
+  </section>
+
+  <!-- 카톡 보내기 -->
+  <section id="v-kakao">
+    <h1>💬 찍은 영상 카톡 보내기</h1>
+    <div class="sub">이름을 누르면 그 아이 앨범(<b>정도태권도2관 › 이름</b>)의 영상이 나와요. 보낼 영상을 고르고 <b>카톡으로 보내기</b>를 누르면 카카오톡이 열리고, 받을 사람(학부모님 채팅방)만 고르면 돼요.</div>
+    <div id="kperm"></div>
+    <input type="search" id="ksearch" placeholder="🔍 이름 또는 초성 (예: ㄱㅅㅇ)" oninput="renderKakao()">
+    <div class="tabs" id="ktabs"></div>
+    <div class="list" id="klist"></div>
   </section>
 
   <!-- 이번 달 안 찍은 명단 -->
@@ -176,6 +198,17 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
   <button class="btn primary" onclick="unshotToCheck()">안 찍은 아이들만 체크 ▶</button>
 </div></div>
+<div class="bar" id="bar-kakao"><div class="in">
+  <button class="btn" onclick="go('check')" style="flex:none;width:auto;padding:11px 14px">←</button>
+  <button class="btn" onclick="loadKids()">↻ 새로고침</button>
+</div></div>
+<div class="modal" id="kmodal" onclick="if(event.target===this)closeMedia()"><div class="sheet">
+  <div style="display:flex;align-items:center;gap:8px"><b id="ktitle" style="flex:1;font-size:17px"></b><button class="btn" style="width:auto;margin:0;padding:7px 12px" onclick="closeMedia()">닫기</button></div>
+  <div class="sub" id="ksub" style="margin:6px 0 0"></div>
+  <div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:8px" onclick="kSelect('today')">오늘 찍은 것</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('all')">전체 선택</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('none')">선택 해제</button></div>
+  <div class="names"><div class="kgrid" id="kmedia"></div></div>
+  <button class="btn primary" id="ksend" onclick="kSend()" style="background:#fee500;border-color:#fee500;color:#191919;font-size:15px;padding:13px">💬 카톡으로 보내기</button>
+</div></div>
 <div class="bar" id="bar-missed"><div class="in">
   <button class="btn" onclick="go('check')">← 돌아가기</button>
 </div></div>
@@ -197,7 +230,7 @@ try{ data = JSON.parse(localStorage.getItem(KEY)) || null; }catch(e){}
 if(!data) data = JSON.parse(JSON.stringify(ROSTER));
 try{ counts = JSON.parse(localStorage.getItem(CNT_KEY)) || {}; }catch(e){}
 try{ Object.assign(S, JSON.parse(localStorage.getItem(ST_KEY)) || {}); }catch(e){}
-if(S.view==='missed'||S.view==='sort'||S.view==='unshot') S.view='check';
+if(S.view==='missed'||S.view==='sort'||S.view==='unshot'||S.view==='kakao') S.view='check';
 const save=()=>{ try{ localStorage.setItem(KEY,JSON.stringify(data)); localStorage.setItem(CNT_KEY,JSON.stringify(counts)); localStorage.setItem(ST_KEY,JSON.stringify(S)); localStorage.setItem(MON_KEY,JSON.stringify(MON)); }catch(e){} };
 
 let tab='전체', cur='', dirHandle=null, pressT=null, longFired=false;
@@ -211,8 +244,8 @@ const isMissed=n=>S.missed.some(m=>m.n===n);
 
 function go(v){ S.view=v; save(); render(); window.scrollTo(0,0); }
 function render(){
-  ['check','shoot','missed','sort','unshot'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
-  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else if(S.view==='sort') renderSort(); else if(S.view==='unshot') renderUnshot(); else renderMissed();
+  ['check','shoot','missed','sort','unshot','kakao'].forEach(v=>{ $('v-'+v).style.display=S.view===v?'block':'none'; $('bar-'+v).style.display=S.view===v?'block':'none'; });
+  if(S.view==='check') renderCheck(); else if(S.view==='shoot') renderShoot(); else if(S.view==='sort') renderSort(); else if(S.view==='unshot') renderUnshot(); else if(S.view==='kakao') renderKakao(); else renderMissed();
 }
 
 /* ---------- ① 체크 ---------- */
@@ -235,6 +268,7 @@ function renderCheck(){
   $('chk-info').textContent=S.checked.length+'명';
   $('start-btn').disabled=S.checked.length===0;
   $('sort-entry').innerHTML=window.Android?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📂 영상 분류</b><span style="color:var(--sub)">찍어둔 영상을 얼굴 보고 이름별 앨범으로 정리</span></div><button class="btn" style="width:auto;margin:0" onclick="go('sort')">열기</button></div>`:'';
+  $('kakao-entry').innerHTML=window.Kakao?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">💬 찍은 영상 카톡 보내기</b><span style="color:var(--sub)">이름 누르고 영상 골라서 학부모님께 바로 전송</span></div><button class="btn kk" style="width:auto;margin:0" onclick="openKakao()">열기</button></div>`:'';
   const um=unshotList().length;
   $('unshot-entry').innerHTML=`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📅 이번 달 안 찍은 아이들 ${um}명</b><span style="color:var(--sub)">전체 명단 중 이번 달 아직 안 찍은 아이들</span></div><button class="btn" style="width:auto;margin:0" onclick="umon=monKey();go('unshot')">보기</button></div>`;
   $('missed-banner').innerHTML=S.missed.length?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">못 찍은 아이 ${S.missed.length}명</b><span style="color:var(--sub)">이전 타임에서 남은 아이들이에요</span></div><button class="btn" style="width:auto;margin:0" onclick="go('missed')">보기</button></div>`:'';
@@ -280,7 +314,7 @@ function renderShoot(){
     :'이름을 누르면 카메라가 열려요. 촬영 후 확인을 누르면 <b>이름_날짜시각.mp4</b>로 저장돼요.';
   $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
   $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
-  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`:''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
   let html='';
   if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
   else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';
@@ -288,6 +322,7 @@ function renderShoot(){
   $('shoot-list').innerHTML=html;
 }
 $('shoot-list').addEventListener('click',e=>{
+  const kb=e.target.closest('[data-kk]'); if(kb){ openMedia(dec(kb.dataset.kk)); return; }
   const r=e.target.closest('.row'); if(!r) return;
   cur=dec(r.dataset.n);
   if(window.Android){
@@ -462,6 +497,68 @@ function bulkSave(){
   if(!confirm(`영상 ${ids.length}개를 ${names.length}명 앨범에 일괄 저장할까요?${skip>0?`\n\n(이름이 비었거나 명단에 없는 ${skip}개는 건너뛰어요)`:''}\n(원본은 그대로 두고, 날짜 표시 없이 복사본을 저장해요)`)) return;
   names.forEach(n=>{ groups[n].forEach(i=>{ SV[i].pending=n; }); Android.saveTo(JSON.stringify(groups[n]),n); });
   saving+=ids.length; sdirty=false; renderSort(); toast(`${ids.length}개 저장을 시작했어요`);
+}
+
+/* ---------- 💬 카톡 보내기 ---------- */
+const SENT_KEY='jd2_sent_v1';
+let SENT={}; try{ SENT=JSON.parse(localStorage.getItem(SENT_KEY))||{}; }catch(e){}
+let KK={kids:[],loaded:false,f:'오늘',cur:null,media:[],sel:new Set()};
+const sameDay=(a,b)=>{ const x=new Date(a),y=new Date(b); return x.getFullYear()===y.getFullYear()&&x.getMonth()===y.getMonth()&&x.getDate()===y.getDate(); };
+const hm=ms=>{ const d=new Date(ms),p=x=>String(x).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+function kMatch(n,q){ q=q.replace(/\s/g,''); if(!q) return true; if(/^[ㄱ-ㅎ]+$/.test(q)){ const c=cho(n); return c.startsWith(q)||c.slice(1).startsWith(q); } return n.includes(q); }
+function openKakao(){ go('kakao'); loadKids(); }
+function loadKids(){ if(!window.Kakao) return; KK.loaded=false; renderKakao(); Kakao.listKids(); }
+window.onKakaoKids=a=>{ KK.kids=a||[]; KK.loaded=true; renderKakao(); };
+window.onMediaPerm=ok=>{ if(ok){ toast('허용됐어요'); loadKids(); } else { toast('허용 안 하면 이 앱에서 저장한 영상만 보여요'); renderKakao(); } };
+function renderKakao(){
+  if(S.view!=='kakao') return;
+  $('kperm').innerHTML=(window.Kakao&&!Kakao.hasMediaPerm())?`<div class="box"><b>📁 갤러리 접근 허용</b>이 앱이 저장한 영상은 바로 보여요. 갤러리에서 <b>직접 폴더로 옮긴 영상</b>까지 보이려면 허용해 주세요.<button class="btn primary" onclick="Kakao.askMediaPerm()">사진·동영상 접근 허용</button></div>`:'';
+  const now=Date.now(), F={'오늘':k=>sameDay(k.last,now),'이번 주':k=>now-k.last<7*864e5,'전체':()=>true};
+  const kids=KK.kids;
+  $('ktabs').innerHTML=Object.keys(F).map(f=>`<button class="tab ${KK.f===f?'active':''}" onclick="KK.f='${f}';renderKakao()">${f}<small>${kids.filter(F[f]).length}</small></button>`).join('');
+  if(!KK.loaded){ $('klist').innerHTML='<div class="empty">앨범을 읽는 중…</div>'; return; }
+  const q=$('ksearch').value.trim();
+  let arr=kids.filter(F[KK.f]).filter(k=>kMatch(k.n,q));
+  arr.sort(KK.f==='전체'?(a,b)=>byRoster(a.n,b.n):(a,b)=>b.last-a.last);
+  $('klist').innerHTML=arr.length?arr.map(k=>{ const s=SENT[k.n], sentToday=s&&sameDay(s,now);
+    return `<div class="row" data-kn="${enc(k.n)}"><span class="nm">${esc(k.n)} <span style="color:var(--sub);font-weight:600;font-size:12px">${esc(gradeOf(k.n))}</span><br><span style="color:var(--sub);font-weight:600;font-size:12px">영상 ${k.cnt}개 · 마지막 ${k.last?hm(k.last):'-'}</span></span>${sentToday?`<span class="sent">보냄 ${hm(s).split(' ')[1]}</span>`:''}<span class="kk">💬</span></div>`; }).join('')
+    :`<div class="empty">${KK.f==='오늘'?'오늘 찍은 아이가 없어요. 위에서 [이번 주]나 [전체]를 눌러 보세요.':'영상이 있는 아이가 없어요.'}</div>`;
+}
+$('klist').addEventListener('click',e=>{ const r=e.target.closest('[data-kn]'); if(r) openMedia(dec(r.dataset.kn)); });
+function openMedia(n){
+  if(!window.Kakao){ toast('앱에서만 돼요'); return; }
+  KK.cur=n; KK.media=null; KK.sel=new Set();
+  $('ktitle').textContent='💬 '+n; $('ksub').textContent='영상을 불러오는 중…'; $('kmedia').innerHTML=''; updKSend();
+  $('kmodal').classList.add('on'); Kakao.listMedia(n);
+}
+function closeMedia(){ $('kmodal').classList.remove('on'); KK.cur=null; }
+window.onKakaoMedia=(n,arr)=>{
+  if(n!==KK.cur) return; KK.media=arr||[];
+  const now=Date.now(), today=KK.media.filter(m=>sameDay(m.ms,now));
+  KK.sel=new Set((today.length?today:KK.media.slice(0,1)).map(m=>m.id));
+  renderMedia();
+};
+function renderMedia(){
+  const m=KK.media||[];
+  $('ksub').textContent=m.length?`영상·사진 ${m.length}개 · 최신순 · 오늘 찍은 것이 미리 골라져 있어요`:'이 아이 앨범에 영상이 없어요';
+  $('kmedia').innerHTML=m.map(x=>{ const on=KK.sel.has(x.id), sec=x.dur?Math.round(x.dur/1000)+'초':'';
+    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button><div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}</div></div>`; }).join('');
+  updKSend();
+}
+function updKSend(){ const n=KK.sel.size; $('ksend').textContent=n?`💬 카톡으로 보내기 (${n}개)`:'보낼 영상을 골라 주세요'; $('ksend').disabled=!n; }
+$('kmedia').addEventListener('click',e=>{
+  const pb=e.target.closest('[data-play]'); if(pb){ Kakao.playMedia(pb.dataset.play); return; }
+  const c=e.target.closest('.kc'); if(!c) return; const id=c.dataset.id;
+  KK.sel.has(id)?KK.sel.delete(id):KK.sel.add(id); renderMedia();
+});
+function kSelect(w){ const m=KK.media||[], now=Date.now();
+  KK.sel=new Set(w==='all'?m.map(x=>x.id):w==='today'?m.filter(x=>sameDay(x.ms,now)).map(x=>x.id):[]);
+  if(w==='today'&&!KK.sel.size) toast('오늘 찍은 영상이 없어요'); renderMedia(); }
+function kSend(){
+  if(!KK.sel.size||!KK.cur) return;
+  const mb=(KK.media||[]).filter(x=>KK.sel.has(x.id)).reduce((a,x)=>a+(x.mb||0),0);
+  if(mb>300&&!confirm(`고른 영상이 ${Math.round(mb)}MB예요. 카톡에서 너무 크면 안 보내질 수 있어요. 그래도 보낼까요?`)) return;
+  if(Kakao.shareKakao(JSON.stringify([...KK.sel]))){ SENT[KK.cur]=Date.now(); try{ localStorage.setItem(SENT_KEY,JSON.stringify(SENT)); }catch(e){} closeMedia(); renderKakao(); }
 }
 
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }

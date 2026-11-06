@@ -3,6 +3,7 @@ package kr.jungdo.video;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -25,6 +26,9 @@ import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.util.Size;
+import android.Manifest;
+import android.os.Build;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.webkit.JavascriptInterface;
@@ -81,6 +85,12 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private static final int REQ_VIDEO = 1;
     private static final int REQ_PICK = 2;
+    private static final int REQ_MEDIA = 3;
+    private static final String KAKAO = "com.kakao.talk";
+
+    // 카톡 보내기용으로 보여준 영상들 (id -> uri, 종류)
+    private final Map<String, Uri> shareUris = new HashMap<>();
+    private final Map<String, String> shareMime = new HashMap<>();
     private static final String ROOT = "정도태권도2관";
 
     private WebView web;
@@ -88,6 +98,7 @@ public class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService lister = Executors.newSingleThreadExecutor(); // 카톡 보내기 목록 읽기 (저장 작업과 따로)
     private FaceDetector detector;
 
     // 분류용으로 가져온 영상들 (id -> uri)
@@ -118,6 +129,7 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         web.addJavascriptInterface(new Bridge(), "Android");
+        web.addJavascriptInterface(new KakaoBridge(), "Kakao");
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
@@ -255,6 +267,214 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    /* ====================== 카톡 보내기 ====================== */
+
+    private class KakaoBridge {
+        /** 갤러리 읽기 권한 있는지 (직접 옮긴 영상까지 보려면 필요) */
+        @JavascriptInterface
+        public boolean hasMediaPerm() { return mediaPermOk(); }
+
+        @JavascriptInterface
+        public void askMediaPerm() {
+            main.post(new Runnable() {
+                @Override public void run() {
+                    if (Build.VERSION.SDK_INT >= 33)
+                        requestPermissions(new String[]{Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES}, REQ_MEDIA);
+                    else
+                        requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_MEDIA);
+                }
+            });
+        }
+
+        /** 정도태권도2관 앨범 안의 이름별 폴더 목록 → window.onKakaoKids([...]) */
+        @JavascriptInterface
+        public void listKids() {
+            lister.execute(new Runnable() {
+                @Override public void run() {
+                    try { js("window.onKakaoKids(" + kidsJson() + ")"); }
+                    catch (Exception e) { toast("영상 목록을 못 읽었어요: " + e.getMessage()); js("window.onKakaoKids([])"); }
+                }
+            });
+        }
+
+        /** 한 아이 폴더의 영상(사진) 목록 + 작은 미리보기 → window.onKakaoMedia(name, [...]) */
+        @JavascriptInterface
+        public void listMedia(final String name) {
+            lister.execute(new Runnable() {
+                @Override public void run() {
+                    try { js("window.onKakaoMedia(" + JSONObject.quote(name) + "," + mediaJson(name) + ")"); }
+                    catch (Exception e) { toast("영상을 못 읽었어요: " + e.getMessage()); js("window.onKakaoMedia(" + JSONObject.quote(name) + ",[])"); }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void playMedia(final String id) {
+            final Uri u = shareUris.get(id);
+            if (u == null) return;
+            main.post(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Intent i = new Intent(Intent.ACTION_VIEW);
+                        i.setDataAndType(u, shareMime.containsKey(id) ? shareMime.get(id) : "video/*");
+                        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(i);
+                    } catch (Exception e) { toast("열 수 없어요"); }
+                }
+            });
+        }
+
+        /** 고른 영상들을 카카오톡으로 보내기 (카톡이 없으면 공유 목록) */
+        @JavascriptInterface
+        public boolean shareKakao(final String idsJson) {
+            try {
+                JSONArray a = new JSONArray(idsJson);
+                final ArrayList<Uri> uris = new ArrayList<>();
+                boolean img = false, vid = false;
+                for (int k = 0; k < a.length(); k++) {
+                    String id = a.getString(k);
+                    Uri u = shareUris.get(id);
+                    if (u == null) continue;
+                    uris.add(u);
+                    String m = shareMime.get(id);
+                    if (m != null && m.startsWith("image")) img = true; else vid = true;
+                }
+                if (uris.isEmpty()) return false;
+                final String type = img && vid ? "*/*" : (img ? "image/*" : "video/*");
+                main.post(new Runnable() {
+                    @Override public void run() { sendToKakao(uris, type); }
+                });
+                return true;
+            } catch (Exception e) {
+                toast("보내기 실패: " + e.getMessage());
+                return false;
+            }
+        }
+    }
+
+    private boolean mediaPermOk() {
+        if (Build.VERSION.SDK_INT >= 33) return checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_MEDIA) js("window.onMediaPerm(" + mediaPermOk() + ")");
+    }
+
+    private void sendToKakao(ArrayList<Uri> uris, String type) {
+        Intent i;
+        if (uris.size() == 1) {
+            i = new Intent(Intent.ACTION_SEND);
+            i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+        } else {
+            i = new Intent(Intent.ACTION_SEND_MULTIPLE);
+            i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+        }
+        i.setType(type);
+        ClipData cd = ClipData.newRawUri("media", uris.get(0));
+        for (int k = 1; k < uris.size(); k++) cd.addItem(new ClipData.Item(uris.get(k)));
+        i.setClipData(cd);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        Intent kakao = new Intent(i).setPackage(KAKAO);
+        try {
+            startActivity(kakao);
+        } catch (Exception e) {
+            try { startActivity(Intent.createChooser(i, "보낼 앱 고르기")); }
+            catch (Exception e2) { toast("보낼 수 있는 앱이 없어요"); }
+        }
+    }
+
+    private static final String[] MEDIA_COLS = {
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.RELATIVE_PATH,
+            MediaStore.Files.FileColumns.MEDIA_TYPE,
+            MediaStore.Files.FileColumns.DATE_TAKEN,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.DURATION,
+            MediaStore.Files.FileColumns.SIZE,
+            MediaStore.Files.FileColumns.MIME_TYPE,
+    };
+    private static final String MEDIA_SEL = MediaStore.Files.FileColumns.RELATIVE_PATH + " LIKE ? AND (" +
+            MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO + " OR " +
+            MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + ")";
+
+    private long takenMs(Cursor c) {
+        long t = c.isNull(3) ? 0 : c.getLong(3);
+        if (t <= 0 && !c.isNull(4)) t = c.getLong(4) * 1000L;
+        return t;
+    }
+
+    /** "Movies/정도태권도2관/김시우/" → "김시우" (앨범 바로 아래 폴더 이름) */
+    private static String kidOf(String rel) {
+        if (rel == null) return null;
+        int k = rel.indexOf(ROOT + "/");
+        if (k < 0) return null;
+        String rest = rel.substring(k + ROOT.length() + 1);
+        int e = rest.indexOf('/');
+        String n = e < 0 ? rest : rest.substring(0, e);
+        return n.isEmpty() ? null : n;
+    }
+
+    private String kidsJson() throws Exception {
+        Map<String, long[]> m = new HashMap<>(); // 이름 -> [개수, 마지막 촬영 ms]
+        Uri base = MediaStore.Files.getContentUri("external");
+        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, MEDIA_SEL, new String[]{"%/" + ROOT + "/%"}, null)) {
+            if (c != null) while (c.moveToNext()) {
+                String n = kidOf(c.getString(1));
+                if (n == null) continue;
+                long[] v = m.get(n);
+                if (v == null) { v = new long[]{0, 0}; m.put(n, v); }
+                v[0]++;
+                v[1] = Math.max(v[1], takenMs(c));
+            }
+        }
+        JSONArray a = new JSONArray();
+        for (Map.Entry<String, long[]> e : m.entrySet()) {
+            JSONObject o = new JSONObject();
+            o.put("n", e.getKey()); o.put("cnt", e.getValue()[0]); o.put("last", e.getValue()[1]);
+            a.put(o);
+        }
+        return a.toString();
+    }
+
+    private String mediaJson(String name) throws Exception {
+        Uri base = MediaStore.Files.getContentUri("external");
+        JSONArray a = new JSONArray();
+        SimpleDateFormat df = new SimpleDateFormat("M/d (E) HH:mm", Locale.KOREA);
+        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, MEDIA_SEL,
+                new String[]{"%/" + ROOT + "/" + name + "/%"}, MediaStore.Files.FileColumns.DATE_ADDED + " DESC")) {
+            if (c != null) while (c.moveToNext()) {
+                if (!name.equals(kidOf(c.getString(1)))) continue;
+                long id = c.getLong(0);
+                boolean video = c.getInt(2) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
+                Uri u = ContentUris.withAppendedId(video ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI : MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
+                String key = "k" + id;
+                shareUris.put(key, u);
+                shareMime.put(key, c.isNull(7) ? (video ? "video/mp4" : "image/jpeg") : c.getString(7));
+                long t = takenMs(c);
+                JSONObject o = new JSONObject();
+                o.put("id", key); o.put("ms", t); o.put("date", t > 0 ? df.format(new Date(t)) : "");
+                o.put("video", video);
+                o.put("dur", c.isNull(5) ? 0 : c.getLong(5));
+                o.put("mb", c.isNull(6) ? 0 : Math.round(c.getLong(6) / 1048576.0 * 10) / 10.0);
+                try {
+                    Bitmap th = getContentResolver().loadThumbnail(u, new Size(240, 240), null);
+                    o.put("thumb", b64(th));
+                } catch (Exception ignored) {}
+                a.put(o);
+            }
+        }
+        // 찍은 시간 최신순
+        List<JSONObject> list = new ArrayList<>();
+        for (int k = 0; k < a.length(); k++) list.add(a.getJSONObject(k));
+        java.util.Collections.sort(list, new java.util.Comparator<JSONObject>() {
+            @Override public int compare(JSONObject x, JSONObject y) { return Long.compare(y.optLong("ms"), x.optLong("ms")); }
+        });
+        return new JSONArray(list).toString();
     }
 
     /* ====================== 촬영 ====================== */
