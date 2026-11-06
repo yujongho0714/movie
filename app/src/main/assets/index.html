@@ -156,7 +156,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <!-- 카톡 보내기 -->
   <section id="v-kakao">
     <h1>💬 찍은 영상 카톡 보내기</h1>
-    <div class="sub">이름을 누르면 그 아이 앨범(<b>정도태권도2관 › 이름</b>)의 영상이 나와요. 보낼 영상을 고르고 <b>카톡으로 보내기</b>를 누르면 카카오톡이 열리고, 받을 사람(학부모님 채팅방)만 고르면 돼요.</div>
+    <div class="sub">갤러리 <b>전체 폴더</b>에서 명단 이름이 붙은 폴더(예: <b>김시우</b>, <b>3학년/김시우</b>)와 <b>이름_날짜</b> 영상을 자동으로 찾아 아이별로 모아요. 이름을 누르면 오늘 찍은 영상이 골라져 있고, <b>카톡으로 보내기</b>를 누르면 카카오톡에서 받을 채팅방만 고르면 돼요.</div>
     <div id="kperm"></div>
     <input type="search" id="ksearch" placeholder="🔍 이름 또는 초성 (예: ㄱㅅㅇ)" oninput="renderKakao()">
     <div class="tabs" id="ktabs"></div>
@@ -506,13 +506,13 @@ let KK={kids:[],loaded:false,f:'오늘',cur:null,media:[],sel:new Set()};
 const sameDay=(a,b)=>{ const x=new Date(a),y=new Date(b); return x.getFullYear()===y.getFullYear()&&x.getMonth()===y.getMonth()&&x.getDate()===y.getDate(); };
 const hm=ms=>{ const d=new Date(ms),p=x=>String(x).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 function kMatch(n,q){ q=q.replace(/\s/g,''); if(!q) return true; if(/^[ㄱ-ㅎ]+$/.test(q)){ const c=cho(n); return c.startsWith(q)||c.slice(1).startsWith(q); } return n.includes(q); }
-function openKakao(){ go('kakao'); loadKids(); }
-function loadKids(){ if(!window.Kakao) return; KK.loaded=false; renderKakao(); Kakao.listKids(); }
+function openKakao(){ go('kakao'); if(window.Kakao&&!Kakao.hasMediaPerm()) Kakao.askMediaPerm(); loadKids(); }
+function loadKids(){ if(!window.Kakao) return; KK.loaded=false; renderKakao(); Kakao.listKids(JSON.stringify(allNames())); }
 window.onKakaoKids=a=>{ KK.kids=a||[]; KK.loaded=true; renderKakao(); };
 window.onMediaPerm=ok=>{ if(ok){ toast('허용됐어요'); loadKids(); } else { toast('허용 안 하면 이 앱에서 저장한 영상만 보여요'); renderKakao(); } };
 function renderKakao(){
   if(S.view!=='kakao') return;
-  $('kperm').innerHTML=(window.Kakao&&!Kakao.hasMediaPerm())?`<div class="box"><b>📁 갤러리 접근 허용</b>이 앱이 저장한 영상은 바로 보여요. 갤러리에서 <b>직접 폴더로 옮긴 영상</b>까지 보이려면 허용해 주세요.<button class="btn primary" onclick="Kakao.askMediaPerm()">사진·동영상 접근 허용</button></div>`:'';
+  $('kperm').innerHTML=(window.Kakao&&!Kakao.hasMediaPerm())?`<div class="box"><b>📁 갤러리 접근 허용이 필요해요</b>허용해야 내 폴더 전체에서 아이 이름 폴더를 찾아요. 지금은 이 앱이 저장한 영상만 보여요.<button class="btn primary" onclick="Kakao.askMediaPerm()">사진·동영상 접근 허용</button></div>`:'';
   const now=Date.now(), F={'오늘':k=>sameDay(k.last,now),'이번 주':k=>now-k.last<7*864e5,'전체':()=>true};
   const kids=KK.kids;
   $('ktabs').innerHTML=Object.keys(F).map(f=>`<button class="tab ${KK.f===f?'active':''}" onclick="KK.f='${f}';renderKakao()">${f}<small>${kids.filter(F[f]).length}</small></button>`).join('');
@@ -540,9 +540,9 @@ window.onKakaoMedia=(n,arr)=>{
 };
 function renderMedia(){
   const m=KK.media||[];
-  $('ksub').textContent=m.length?`영상·사진 ${m.length}개 · 최신순 · 오늘 찍은 것이 미리 골라져 있어요`:'이 아이 앨범에 영상이 없어요';
+  $('ksub').textContent=m.length?`찾은 영상 ${m.length}개 · 최신순 · ${m.some(x=>sameDay(x.ms,Date.now()))?'오늘 찍은 것이 미리 골라져 있어요':'오늘 찍은 게 없어서 가장 최근 1개를 골라뒀어요'}`:'이 아이 이름이 붙은 폴더·영상을 못 찾았어요';
   $('kmedia').innerHTML=m.map(x=>{ const on=KK.sel.has(x.id), sec=x.dur?Math.round(x.dur/1000)+'초':'';
-    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button><div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}</div></div>`; }).join('');
+    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button><div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}${x.folder?`<br>📁 ${esc(x.folder.split('/').slice(-2).join('/'))}`:''}</div></div>`; }).join('');
   updKSend();
 }
 function updKSend(){ const n=KK.sel.size; $('ksend').textContent=n?`💬 카톡으로 보내기 (${n}개)`:'보낼 영상을 골라 주세요'; $('ksend').disabled=!n; }

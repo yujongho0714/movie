@@ -10,8 +10,8 @@ android {
         applicationId = "kr.jungdo.video"
         minSdk = 29
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.4"
+        versionCode = 7
+        versionName = "1.5"
     }
 
     // 매번 같은 서명으로 만들어서 새 버전이 기존 앱 위에 바로 업데이트되게 함

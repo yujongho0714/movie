@@ -288,12 +288,15 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** 정도태권도2관 앨범 안의 이름별 폴더 목록 → window.onKakaoKids([...]) */
+        /**
+         * 갤러리 전체에서 명단 이름이 붙은 폴더(또는 '이름_날짜' 파일)를 찾아 아이별로 모음 → window.onKakaoKids([...])
+         * namesJson = 명단 이름들 ["김시우", ...]
+         */
         @JavascriptInterface
-        public void listKids() {
+        public void listKids(final String namesJson) {
             lister.execute(new Runnable() {
                 @Override public void run() {
-                    try { js("window.onKakaoKids(" + kidsJson() + ")"); }
+                    try { setRoster(namesJson); js("window.onKakaoKids(" + kidsJson() + ")"); }
                     catch (Exception e) { toast("영상 목록을 못 읽었어요: " + e.getMessage()); js("window.onKakaoKids([])"); }
                 }
             });
@@ -397,10 +400,22 @@ public class MainActivity extends Activity {
             MediaStore.Files.FileColumns.DURATION,
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
     };
-    private static final String MEDIA_SEL = MediaStore.Files.FileColumns.RELATIVE_PATH + " LIKE ? AND (" +
-            MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO + " OR " +
-            MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE + ")";
+    /** 영상만 (사진은 빼고) */
+    private static final String VIDEO_ONLY = MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
+
+    private final java.util.Set<String> roster = new java.util.HashSet<>();
+
+    private void setRoster(String namesJson) {
+        try {
+            JSONArray a = new JSONArray(namesJson);
+            synchronized (roster) {
+                roster.clear();
+                for (int k = 0; k < a.length(); k++) { String n = a.optString(k, "").trim(); if (n.length() >= 2) roster.add(n); }
+            }
+        } catch (Exception ignored) {}
+    }
 
     private long takenMs(Cursor c) {
         long t = c.isNull(3) ? 0 : c.getLong(3);
@@ -408,28 +423,57 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    /** "Movies/정도태권도2관/김시우/" → "김시우" (앨범 바로 아래 폴더 이름) */
-    private static String kidOf(String rel) {
-        if (rel == null) return null;
-        int k = rel.indexOf(ROOT + "/");
-        if (k < 0) return null;
-        String rest = rel.substring(k + ROOT.length() + 1);
-        int e = rest.indexOf('/');
-        String n = e < 0 ? rest : rest.substring(0, e);
-        return n.isEmpty() ? null : n;
+    private static boolean isHangul(char c) { return c >= '가' && c <= '힣'; }
+
+    /** 글자 안에 이름이 '따로' 들어 있는지 (김시우 ≠ 김시우진). 앞뒤가 한글이 아니면 OK */
+    private static boolean hasWord(String text, String name) {
+        int from = 0;
+        while (true) {
+            int k = text.indexOf(name, from);
+            if (k < 0) return false;
+            boolean before = k == 0 || !isHangul(text.charAt(k - 1));
+            int e = k + name.length();
+            boolean after = e >= text.length() || !isHangul(text.charAt(e));
+            if (before && after) return true;
+            from = k + 1;
+        }
+    }
+
+    /**
+     * 이 영상이 누구 것인지: 폴더 이름(경로의 어느 단계든) 또는 파일 이름에 명단 이름이 있으면 그 아이.
+     * 폴더 이름이 명단 이름과 '똑같으면' 그 아이만 (김시우(유치부) 폴더 → 김시우(유치부)만, 김시우는 아님)
+     */
+    private java.util.Set<String> ownersOf(String rel, String display) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        java.util.Set<String> names;
+        synchronized (roster) { names = new java.util.HashSet<>(roster); }
+        if (names.isEmpty()) return out;
+        if (rel != null) for (String seg : rel.split("/")) {
+            seg = seg.trim();
+            if (seg.isEmpty()) continue;
+            if (names.contains(seg)) { out.add(seg); continue; }
+            for (String n : names) if (hasWord(seg, n)) out.add(n);
+        }
+        if (out.isEmpty() && display != null) {
+            String base = display.contains(".") ? display.substring(0, display.lastIndexOf('.')) : display;
+            String head = base.contains("_") ? base.substring(0, base.indexOf('_')) : base;
+            if (names.contains(head)) out.add(head);
+            else for (String n : names) if (hasWord(base, n)) out.add(n);
+        }
+        return out;
     }
 
     private String kidsJson() throws Exception {
         Map<String, long[]> m = new HashMap<>(); // 이름 -> [개수, 마지막 촬영 ms]
         Uri base = MediaStore.Files.getContentUri("external");
-        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, MEDIA_SEL, new String[]{"%/" + ROOT + "/%"}, null)) {
+        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, VIDEO_ONLY, null, null)) {
             if (c != null) while (c.moveToNext()) {
-                String n = kidOf(c.getString(1));
-                if (n == null) continue;
-                long[] v = m.get(n);
-                if (v == null) { v = new long[]{0, 0}; m.put(n, v); }
-                v[0]++;
-                v[1] = Math.max(v[1], takenMs(c));
+                for (String n : ownersOf(c.getString(1), c.getString(8))) {
+                    long[] v = m.get(n);
+                    if (v == null) { v = new long[]{0, 0}; m.put(n, v); }
+                    v[0]++;
+                    v[1] = Math.max(v[1], takenMs(c));
+                }
             }
         }
         JSONArray a = new JSONArray();
@@ -443,37 +487,42 @@ public class MainActivity extends Activity {
 
     private String mediaJson(String name) throws Exception {
         Uri base = MediaStore.Files.getContentUri("external");
-        JSONArray a = new JSONArray();
         SimpleDateFormat df = new SimpleDateFormat("M/d (E) HH:mm", Locale.KOREA);
-        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, MEDIA_SEL,
-                new String[]{"%/" + ROOT + "/" + name + "/%"}, MediaStore.Files.FileColumns.DATE_ADDED + " DESC")) {
+        // 이름 글자(괄호 앞)가 경로나 파일 이름에 들어 있는 영상만 먼저 추린 뒤, 정확히 다시 확인
+        String key = name.contains("(") ? name.substring(0, name.indexOf('(')) : name;
+        String sel = VIDEO_ONLY + " AND (" + MediaStore.Files.FileColumns.RELATIVE_PATH + " LIKE ? OR " + MediaStore.Files.FileColumns.DISPLAY_NAME + " LIKE ?)";
+        String like = "%" + key + "%";
+        List<JSONObject> list = new ArrayList<>();
+        try (Cursor c = getContentResolver().query(base, MEDIA_COLS, sel, new String[]{like, like}, null)) {
             if (c != null) while (c.moveToNext()) {
-                if (!name.equals(kidOf(c.getString(1)))) continue;
+                if (!ownersOf(c.getString(1), c.getString(8)).contains(name)) continue;
                 long id = c.getLong(0);
-                boolean video = c.getInt(2) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
-                Uri u = ContentUris.withAppendedId(video ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI : MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id);
-                String key = "k" + id;
-                shareUris.put(key, u);
-                shareMime.put(key, c.isNull(7) ? (video ? "video/mp4" : "image/jpeg") : c.getString(7));
+                Uri u = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+                String k = "k" + id;
+                shareUris.put(k, u);
+                shareMime.put(k, c.isNull(7) ? "video/mp4" : c.getString(7));
                 long t = takenMs(c);
                 JSONObject o = new JSONObject();
-                o.put("id", key); o.put("ms", t); o.put("date", t > 0 ? df.format(new Date(t)) : "");
-                o.put("video", video);
+                o.put("id", k); o.put("ms", t); o.put("date", t > 0 ? df.format(new Date(t)) : "");
+                o.put("video", true);
                 o.put("dur", c.isNull(5) ? 0 : c.getLong(5));
                 o.put("mb", c.isNull(6) ? 0 : Math.round(c.getLong(6) / 1048576.0 * 10) / 10.0);
-                try {
-                    Bitmap th = getContentResolver().loadThumbnail(u, new Size(240, 240), null);
-                    o.put("thumb", b64(th));
-                } catch (Exception ignored) {}
-                a.put(o);
+                String rel = c.getString(1);
+                o.put("folder", rel == null ? "" : rel.replaceAll("/+$", ""));
+                list.add(o);
             }
         }
-        // 찍은 시간 최신순
-        List<JSONObject> list = new ArrayList<>();
-        for (int k = 0; k < a.length(); k++) list.add(a.getJSONObject(k));
+        // 찍은 시간 최신순, 미리보기는 최근 60개까지만 (느려지지 않게)
         java.util.Collections.sort(list, new java.util.Comparator<JSONObject>() {
             @Override public int compare(JSONObject x, JSONObject y) { return Long.compare(y.optLong("ms"), x.optLong("ms")); }
         });
+        for (int k = 0; k < list.size() && k < 60; k++) {
+            JSONObject o = list.get(k);
+            try {
+                Bitmap th = getContentResolver().loadThumbnail(shareUris.get(o.getString("id")), new Size(240, 240), null);
+                o.put("thumb", b64(th));
+            } catch (Exception ignored) {}
+        }
         return new JSONArray(list).toString();
     }
 
