@@ -40,6 +40,7 @@ import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.C;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.effect.BitmapOverlay;
 import androidx.media3.effect.OverlayEffect;
@@ -446,6 +447,16 @@ public class MainActivity extends Activity {
             });
         }
 
+        @JavascriptInterface
+        public void frameAt(String id, long ms) { frameAtImpl(id, ms); }
+
+        /** 구간 자르기·음소거 해서 보내기 (완료되면 window.onKakaoExportDone) */
+        @JavascriptInterface
+        public boolean shareKakaoEdited(String itemsJson, boolean mute) {
+            try { shareEditedImpl(itemsJson, mute); return true; }
+            catch (Exception e) { toast("보내기 준비 실패: " + e.getMessage()); return false; }
+        }
+
         /** 고른 영상들을 카카오톡으로 보내기 (카톡이 없으면 공유 목록) */
         @JavascriptInterface
         public boolean shareKakao(final String idsJson) {
@@ -483,6 +494,98 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_MEDIA) js("window.onMediaPerm(" + mediaPermOk() + ")");
+    }
+
+    /* ---------- ✂️ 구간 자르기 + 🔇 음소거 해서 보내기 ---------- */
+
+    private MediaMetadataRetriever frameR; private String frameRid; private int frameRot, frameW, frameH;
+
+    /** 구간 고를 때 미리보기 그림: 그 시각(ms)의 화면 → window.onKakaoFrame(id, ms, 그림) */
+    private void frameAtImpl(final String id, final long ms) {
+        lister.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    Uri u = shareUris.get(id);
+                    if (u == null) return;
+                    if (!id.equals(frameRid)) {
+                        if (frameR != null) try { frameR.release(); } catch (Exception ignored) {}
+                        frameR = new MediaMetadataRetriever();
+                        frameR.setDataSource(MainActivity.this, u);
+                        frameRid = id;
+                        frameRot = parseInt(frameR.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION), 0);
+                        frameW = parseInt(frameR.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH), 0);
+                        frameH = parseInt(frameR.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT), 0);
+                    }
+                    Bitmap fr = frameR.getScaledFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST, 640, 640);
+                    if (fr == null) fr = frameR.getScaledFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 640, 640);
+                    if (fr == null) return;
+                    fr = upright(fr, frameRot, frameW, frameH);
+                    js("window.onKakaoFrame(" + JSONObject.quote(id) + "," + ms + "," + JSONObject.quote(b64(fr)) + ")");
+                } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    /**
+     * items = [{id, s(시작 ms), e(끝 ms, 0이면 끝까지)}], mute = 소리 빼기
+     * 한 개씩 새 영상으로 만든 뒤 한꺼번에 카톡으로 보냄. 원본은 그대로 둠
+     */
+    private void shareEditedImpl(String itemsJson, final boolean mute) throws Exception {
+        JSONArray a = new JSONArray(itemsJson);
+        final ArrayDeque<JSONObject> q = new ArrayDeque<>();
+        for (int k = 0; k < a.length(); k++) q.add(a.getJSONObject(k));
+        final File dir = new File(getCacheDir(), "share");
+        if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); } else dir.mkdirs();
+        final ArrayList<Uri> outs = new ArrayList<>();
+        final int total = q.size();
+        main.post(new Runnable() { @Override public void run() { exportNext(q, outs, dir, mute, total); } });
+    }
+
+    private void exportNext(final ArrayDeque<JSONObject> q, final ArrayList<Uri> outs, final File dir, final boolean mute, final int total) {
+        final JSONObject it = q.poll();
+        if (it == null) {
+            if (outs.isEmpty()) { js("window.onKakaoExportDone(false)"); return; }
+            sendToKakao(outs, "video/*");
+            js("window.onKakaoExportDone(true)");
+            return;
+        }
+        js("window.onKakaoExportProgress(" + (total - q.size()) + "," + total + ")");
+        try {
+            String id = it.getString("id");
+            Uri src = shareUris.get(id);
+            String mime = shareMime.get(id);
+            if (src == null) { exportNext(q, outs, dir, mute, total); return; }
+            if (mime != null && mime.startsWith("image")) {           // 사진은 그대로
+                outs.add(src); exportNext(q, outs, dir, mute, total); return;
+            }
+            long sMs = it.optLong("s", 0), eMs = it.optLong("e", 0);
+            MediaItem.Builder mb = new MediaItem.Builder().setUri(src);
+            if (sMs > 0 || eMs > 0) {
+                MediaItem.ClippingConfiguration.Builder cb = new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(Math.max(0, sMs));
+                if (eMs > sMs) cb.setEndPositionMs(eMs);
+                mb.setClippingConfiguration(cb.build());
+            }
+            EditedMediaItem item = new EditedMediaItem.Builder(mb.build()).setRemoveAudio(mute).build();
+            String nm = it.optString("name", "video").replaceAll("[\\\\/:*?\"<>|]", "_");
+            final File out = new File(dir, nm + "_" + (total - q.size()) + ".mp4");
+            Transformer t = new Transformer.Builder(this)
+                    .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .addListener(new Transformer.Listener() {
+                        @Override public void onCompleted(Composition composition, ExportResult exportResult) {
+                            outs.add(FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out));
+                            exportNext(q, outs, dir, mute, total);
+                        }
+                        @Override public void onError(Composition composition, ExportResult exportResult, ExportException e) {
+                            toast("영상 하나를 만들지 못했어요: " + e.getMessage());
+                            exportNext(q, outs, dir, mute, total);
+                        }
+                    })
+                    .build();
+            t.start(item, out.getAbsolutePath());
+        } catch (Exception e) {
+            toast("영상 만들기 실패: " + e.getMessage());
+            exportNext(q, outs, dir, mute, total);
+        }
     }
 
     private void sendToKakao(ArrayList<Uri> uris, String type) {

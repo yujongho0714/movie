@@ -104,6 +104,19 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .kc .mt{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;font-size:10.5px;padding:3px 5px;line-height:1.3}
 .kk{flex:none;border:1px solid #f7e600;background:#fee500;color:#191919;border-radius:8px;padding:6px 10px;font-weight:800;font-size:13px}
 .sent{font-size:11px;font-weight:700;color:var(--ok);border:1px solid var(--ok);border-radius:999px;padding:2px 7px}
+.kc .cut{position:absolute;right:5px;top:34px;border:none;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:4px 8px;font-weight:700}
+.kc .cb{position:absolute;left:0;right:0;top:64px;text-align:center;pointer-events:none}
+.kc .cb span{background:#ff7a00;color:#fff;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 7px}
+.mute{display:flex;align-items:center;gap:10px;margin-top:8px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-weight:700;font-size:14px}
+.mute input{width:22px;height:22px;accent-color:var(--accent)}
+.clipv{width:100%;aspect-ratio:16/10;object-fit:contain;background:#000;border-radius:10px;display:block}
+.rng{margin-top:10px}
+.rng label{display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--sub)}
+.rng label b{color:var(--ink);font-size:15px}
+.rng input[type=range]{width:100%;height:34px;accent-color:var(--accent)}
+.clen{text-align:center;font-weight:800;font-size:15px;margin-top:6px}
+.nudge{display:flex;gap:6px;margin-top:2px}
+.nudge .btn{margin:0;padding:7px 4px;font-size:12.5px}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -208,7 +221,19 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <div id="kdone"></div>
   <div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:8px" onclick="kSelect('today')">오늘 찍은 것</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('all')">전체 선택</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('none')">선택 해제</button></div>
   <div class="names"><div class="kgrid" id="kmedia"></div></div>
+  <label class="mute"><input type="checkbox" id="kmute" onchange="setMute(this.checked)"> 🔇 소리 없이(음소거) 보내기</label>
   <button class="btn primary" id="ksend" onclick="kSend()" style="background:#fee500;border-color:#fee500;color:#191919;font-size:15px;padding:13px">💬 카톡으로 보내기</button>
+</div></div>
+<div class="modal" id="kclip" style="z-index:250" onclick="if(event.target===this)closeClip()"><div class="sheet" style="overflow:auto">
+  <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;font-size:17px">✂️ 보낼 구간 정하기</b><button class="btn" style="width:auto;margin:0;padding:7px 12px" onclick="closeClip()">닫기</button></div>
+  <div class="sub" style="margin:6px 0 8px">막대를 움직이면 그 장면이 보여요. 시작과 끝을 정하고 <b>이 구간으로</b>를 누르세요.</div>
+  <img id="cimg" class="clipv" alt="">
+  <div class="rng"><label>시작 <b id="cs-t">0:00</b></label><input type="range" id="cs" min="0" step="100" oninput="clipMove('s')"></div>
+  <div class="nudge"><button class="btn" onclick="clipNudge('s',-1000)">−1초</button><button class="btn" onclick="clipNudge('s',-100)">−0.1</button><button class="btn" onclick="clipNudge('s',100)">+0.1</button><button class="btn" onclick="clipNudge('s',1000)">+1초</button></div>
+  <div class="rng"><label>끝 <b id="ce-t">0:00</b></label><input type="range" id="ce" min="0" step="100" oninput="clipMove('e')"></div>
+  <div class="nudge"><button class="btn" onclick="clipNudge('e',-1000)">−1초</button><button class="btn" onclick="clipNudge('e',-100)">−0.1</button><button class="btn" onclick="clipNudge('e',100)">+0.1</button><button class="btn" onclick="clipNudge('e',1000)">+1초</button></div>
+  <div class="clen" id="clen"></div>
+  <div style="display:flex;gap:6px"><button class="btn" onclick="clipClear()">구간 없애기 (전체)</button><button class="btn primary" onclick="clipSave()">이 구간으로 ✓</button></div>
 </div></div>
 <div class="bar" id="bar-missed"><div class="in">
   <button class="btn" onclick="go('check')">← 돌아가기</button>
@@ -508,7 +533,7 @@ const LOG_KEY='jd2_sentlog_v1';
 let SLOG=[]; try{ SLOG=JSON.parse(localStorage.getItem(LOG_KEY))||[]; }catch(e){}
 const saveSent=()=>{ const lim=Date.now()-90*864e5; SLOG=SLOG.filter(x=>x.ms>lim); try{ localStorage.setItem(SENT_KEY,JSON.stringify(SENT)); localStorage.setItem(LOG_KEY,JSON.stringify(SLOG)); }catch(e){} };
 const sentToday=n=>SENT[n]&&sameDay(SENT[n],Date.now());
-let KK={kids:[],loaded:false,f:'오늘',cur:null,media:[],sel:new Set(),done:null};
+let KK={kids:[],loaded:false,f:'오늘',cur:null,media:[],sel:new Set(),done:null,clips:{},busy:false};
 function sameDay(a,b){ if(!a||!b) return false; const x=new Date(a),y=new Date(b); return x.getFullYear()===y.getFullYear()&&x.getMonth()===y.getMonth()&&x.getDate()===y.getDate(); }
 const hm=ms=>{ const d=new Date(ms),p=x=>String(x).padStart(2,'0'); return `${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 function kMatch(n,q){ q=q.replace(/\s/g,''); if(!q) return true; if(/^[ㄱ-ㅎ]+$/.test(q)){ const c=cho(n); return c.startsWith(q)||c.slice(1).startsWith(q); } return n.includes(q); }
@@ -555,7 +580,8 @@ function clearSentLog(){ if(!confirm('전송 완료 기록을 모두 지울까�
 $('klist').addEventListener('click',e=>{ const re=e.target.closest('[data-re]'); if(re){ openMedia(dec(re.dataset.re)); return; } const r=e.target.closest('[data-kn]'); if(r) openMedia(dec(r.dataset.kn)); });
 function openMedia(n){
   if(!window.Kakao){ toast('앱에서만 돼요'); return; }
-  KK.cur=n; KK.media=null; KK.sel=new Set(); KK.done=null;
+  KK.cur=n; KK.media=null; KK.sel=new Set(); KK.done=null; KK.clips={}; KK.busy=false;
+  $('kmute').checked=getMute();
   $('ktitle').textContent='💬 '+n; $('ksub').textContent='영상을 불러오는 중…'; $('kmedia').innerHTML=''; updKSend();
   $('kmodal').classList.add('on'); Kakao.listMedia(n);
 }
@@ -570,7 +596,8 @@ function renderMedia(){
   const m=KK.media||[];
   $('ksub').textContent=m.length?`찾은 영상 ${m.length}개 · 최신순 · ${m.some(x=>sameDay(x.ms,Date.now()))?'오늘 찍은 것이 미리 골라져 있어요':'오늘 찍은 게 없어서 가장 최근 1개를 골라뒀어요'}`:'이 아이 이름이 붙은 폴더·영상을 못 찾았어요';
   $('kmedia').innerHTML=m.map(x=>{ const on=KK.sel.has(x.id), sec=x.dur?Math.round(x.dur/1000)+'초':'';
-    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button><div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}${x.folder?`<br>📁 ${esc(x.folder.split('/').slice(-2).join('/'))}`:''}</div></div>`; }).join('');
+    const cl=KK.clips[x.id];
+    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button>${x.video&&Kakao.frameAt?`<button class="cut" data-cut="${x.id}">✂️</button>`:''}${cl?`<div class="cb"><span>✂️ ${mmss(cl.s)}~${mmss(cl.e)}</span></div>`:''}<div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}${x.folder?`<br>📁 ${esc(x.folder.split('/').slice(-2).join('/'))}`:''}</div></div>`; }).join('');
   updKSend();
 }
 function updKSend(){
@@ -580,6 +607,7 @@ function updKSend(){
 }
 $('kmedia').addEventListener('click',e=>{
   const pb=e.target.closest('[data-play]'); if(pb){ Kakao.playMedia(pb.dataset.play); return; }
+  const cb=e.target.closest('[data-cut]'); if(cb){ openClip(cb.dataset.cut); return; }
   const c=e.target.closest('.kc'); if(!c) return; const id=c.dataset.id;
   KK.sel.has(id)?KK.sel.delete(id):KK.sel.add(id); renderMedia();
 });
@@ -587,15 +615,59 @@ function kSelect(w){ const m=KK.media||[], now=Date.now();
   KK.sel=new Set(w==='all'?m.map(x=>x.id):w==='today'?m.filter(x=>sameDay(x.ms,now)).map(x=>x.id):[]);
   if(w==='today'&&!KK.sel.size) toast('오늘 찍은 영상이 없어요'); renderMedia(); }
 function kSend(){
-  if(!KK.sel.size||!KK.cur) return;
-  const mb=(KK.media||[]).filter(x=>KK.sel.has(x.id)).reduce((a,x)=>a+(x.mb||0),0);
-  if(mb>300&&!confirm(`고른 영상이 ${Math.round(mb)}MB예요. 카톡에서 너무 크면 안 보내질 수 있어요. 그래도 보낼까요?`)) return;
-  if(Kakao.shareKakao(JSON.stringify([...KK.sel]))){
-    const ms=Date.now(), cnt=KK.sel.size;
-    SENT[KK.cur]=ms; SLOG.push({n:KK.cur,ms,cnt}); saveSent();
-    KK.done={ms,cnt}; updKSend();   // 창은 그대로 두고 '보내기 완료' 표시 → 카톡에서 돌아오면 바로 보임
+  if(!KK.sel.size||!KK.cur||KK.busy) return;
+  const items=(KK.media||[]).filter(x=>KK.sel.has(x.id));
+  const mute=$('kmute').checked, edited=mute||items.some(x=>KK.clips[x.id]);
+  const mb=items.reduce((a,x)=>a+(x.mb||0),0);
+  if(!edited&&mb>300&&!confirm(`고른 영상이 ${Math.round(mb)}MB예요. 카톡에서 너무 크면 안 보내질 수 있어요. 그래도 보낼까요?`)) return;
+  if(edited&&Kakao.shareKakaoEdited){
+    // ✂️ 구간 · 🔇 음소거 → 새 영상을 만든 뒤 보냄 (원본은 그대로)
+    const list=items.map(x=>{ const c=KK.clips[x.id]; return {id:x.id,s:c?c.s:0,e:c?c.e:0,name:KK.cur}; });
+    if(Kakao.shareKakaoEdited(JSON.stringify(list),mute)){ KK.busy=true; KK.sendCnt=list.length; $('ksend').disabled=true; $('ksend').textContent='영상 만드는 중…'; }
+    return;
   }
+  if(Kakao.shareKakao(JSON.stringify([...KK.sel]))) markSent(KK.sel.size);
 }
+function markSent(cnt){
+  const ms=Date.now();
+  SENT[KK.cur]=ms; SLOG.push({n:KK.cur,ms,cnt}); saveSent();
+  KK.done={ms,cnt}; updKSend();   // 창은 그대로 두고 '보내기 완료' 표시 → 카톡에서 돌아오면 바로 보임
+}
+window.onKakaoExportProgress=(i,t)=>{ $('ksend').textContent=`영상 만드는 중… ${i} / ${t}`+($('kmute').checked?' (음소거)':''); };
+window.onKakaoExportDone=ok=>{ KK.busy=false; if(ok&&KK.cur) markSent(KK.sendCnt||KK.sel.size); else { toast('영상을 만들지 못했어요'); updKSend(); } };
+const MUTE_KEY='jd2_mute_v1';
+function getMute(){ try{ const v=localStorage.getItem(MUTE_KEY); return v===null?true:v==='1'; }catch(e){ return true; } }
+function setMute(v){ try{ localStorage.setItem(MUTE_KEY,v?'1':'0'); }catch(e){} }
+const mmss=ms=>{ const t=Math.max(0,Math.round(ms/100)/10), m=Math.floor(t/60), sec=t-m*60; return m+':'+(sec<10?'0':'')+(Number.isInteger(sec)?sec:sec.toFixed(1)); };
+
+/* ---------- ✂️ 구간 정하기 ---------- */
+let CL={id:null,dur:0,t:null};
+function openClip(id){
+  const x=(KK.media||[]).find(m=>m.id===id); if(!x) return;
+  const dur=x.dur||0; if(dur<500){ toast('영상 길이를 몰라서 자를 수 없어요'); return; }
+  CL={id,dur,t:null};
+  const c=KK.clips[id]||{s:0,e:dur};
+  $('cs').max=dur; $('ce').max=dur; $('cs').value=c.s; $('ce').value=c.e;
+  $('cimg').src=x.thumb||''; clipLabels(); $('kclip').classList.add('on');
+  Kakao.frameAt(id,c.s);
+}
+function closeClip(){ $('kclip').classList.remove('on'); CL.id=null; }
+function clipLabels(){ const s=+$('cs').value, e=+$('ce').value; $('cs-t').textContent=mmss(s); $('ce-t').textContent=mmss(e); $('clen').textContent=e>s?`보낼 길이 ${mmss(e-s)}`:'끝이 시작보다 뒤여야 해요'; }
+function clipMove(which){
+  let s=+$('cs').value, e=+$('ce').value;
+  if(which==='s'&&s>e-300){ e=Math.min(CL.dur,s+300); $('ce').value=e; }
+  if(which==='e'&&e<s+300){ s=Math.max(0,e-300); $('cs').value=s; }
+  clipLabels(); clearTimeout(CL.t); const ms=which==='s'?s:e;
+  CL.t=setTimeout(()=>{ if(CL.id) Kakao.frameAt(CL.id,ms); },180);
+}
+function clipNudge(which,d){ const el=$(which==='s'?'cs':'ce'); el.value=Math.max(0,Math.min(CL.dur,+el.value+d)); clipMove(which); }
+window.onKakaoFrame=(id,ms,img)=>{ if(id===CL.id) $('cimg').src=img; };
+function clipSave(){
+  const s=+$('cs').value, e=+$('ce').value; if(e<=s){ toast('끝이 시작보다 뒤여야 해요'); return; }
+  if(s<=0&&e>=CL.dur) delete KK.clips[CL.id]; else KK.clips[CL.id]={s,e};
+  KK.sel.add(CL.id); closeClip(); renderMedia();
+}
+function clipClear(){ delete KK.clips[CL.id]; closeClip(); renderMedia(); }
 
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
 render();
