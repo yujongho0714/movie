@@ -461,6 +461,18 @@ public class MainActivity extends Activity {
             catch (Exception e) { toast("보내기 준비 실패: " + e.getMessage()); return false; }
         }
 
+        @JavascriptInterface
+        public boolean shareKakaoText(String idsJson, String text) { pendingText = text == null ? "" : text; return shareKakao(idsJson); }
+
+        @JavascriptInterface
+        public boolean shareKakaoEditedText(String itemsJson, boolean mute, String text) { pendingText = text == null ? "" : text; return shareKakaoEdited(itemsJson, mute); }
+
+        @JavascriptInterface
+        public void sendText(final String text) { main.post(new Runnable() { @Override public void run() { sendTextToKakao(text); } }); }
+
+        @JavascriptInterface
+        public void copy(String text) { copyText(text); toast("복사했어요"); }
+
         /** 고른 영상들을 카카오톡으로 보내기 (카톡이 없으면 공유 목록) */
         @JavascriptInterface
         public boolean shareKakao(final String idsJson) {
@@ -581,6 +593,7 @@ public class MainActivity extends Activity {
             final File out = new File(dir, nm + "_" + (total - q.size()) + ".mp4");
             Transformer t = new Transformer.Builder(this)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .experimentalSetTrimOptimizationEnabled(true)   // 자를 때 앞부분만 다시 만들고 나머지는 그대로 복사 → 훨씬 빠름
                     .addListener(new Transformer.Listener() {
                         @Override public void onCompleted(Composition composition, ExportResult exportResult) {
                             Uri fu = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out);
@@ -602,6 +615,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 영상과 같이 보낼 문구 (보내기 직전에 화면에서 받아 둠) */
+    private String pendingText = "";
+
+    /** 문구를 클립보드에 복사 (카톡은 영상과 글을 한 번에 안 받는 경우가 많아서, 채팅방에서 붙여넣기 하면 됨) */
+    private void copyText(String text) {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(ClipData.newPlainText("문구", text));
+        } catch (Exception ignored) {}
+    }
+
+    /** 문구만 카톡으로 보내기 */
+    private void sendTextToKakao(String text) {
+        Intent i = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+        try { startActivity(new Intent(i).setPackage(KAKAO)); }
+        catch (Exception e) {
+            try { startActivity(Intent.createChooser(i, "보낼 앱 고르기")); } catch (Exception e2) { toast("보낼 수 있는 앱이 없어요"); }
+        }
+    }
+
     private void sendToKakao(ArrayList<Uri> uris, String type) {
         Intent i;
         if (uris.size() == 1) {
@@ -612,6 +645,11 @@ public class MainActivity extends Activity {
             i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
         }
         i.setType(type);
+        if (pendingText != null && !pendingText.trim().isEmpty()) {
+            i.putExtra(Intent.EXTRA_TEXT, pendingText);   // 카톡이 받아 주면 같이 감
+            copyText(pendingText);                         // 안 받아 줘도 붙여넣기 할 수 있게
+            toast("문구가 복사됐어요. 채팅방 입력칸을 길게 눌러 '붙여넣기' 하세요");
+        }
         ClipData cd = ClipData.newRawUri("media", uris.get(0));
         for (int k = 1; k < uris.size(); k++) cd.addItem(new ClipData.Item(uris.get(k)));
         i.setClipData(cd);

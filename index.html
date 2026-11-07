@@ -117,6 +117,13 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .clen{text-align:center;font-weight:800;font-size:15px;margin-top:6px}
 .nudge{display:flex;gap:6px;margin-top:2px}
 .nudge .btn{margin:0;padding:7px 4px;font-size:12.5px}
+#kmodal .sheet{overflow:auto}
+#kmodal .names{flex:none;max-height:none;overflow:visible}
+.msgbox{margin-top:8px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.msgbox textarea{width:100%;min-height:118px;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit;font-size:14px;line-height:1.45;background:var(--bg);color:var(--ink);resize:vertical}
+.tchips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.tchip{border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:5px 11px;font-size:12.5px;font-weight:700;color:var(--ink)}
+.tchip.on{background:var(--accent);border-color:var(--accent);color:#141414}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -221,6 +228,13 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <div id="kdone"></div>
   <div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:8px" onclick="kSelect('today')">오늘 찍은 것</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('all')">전체 선택</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('none')">선택 해제</button></div>
   <div class="names"><div class="kgrid" id="kmedia"></div></div>
+  <div class="msgbox">
+    <div style="display:flex;align-items:center;gap:6px"><b style="flex:1">✉️ 같이 보낼 문구</b><label style="font-size:12.5px;font-weight:700"><input type="checkbox" id="kusemsg" onchange="setUseMsg(this.checked)"> 보내기</label></div>
+    <div class="tchips" id="tchips"></div>
+    <textarea id="kmsg" oninput="KK.msgEdited=true"></textarea>
+    <div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:7px;font-size:12.5px" onclick="saveTpl()">이 문구로 저장 (<span id="tplname"></span>)</button><button class="btn" style="margin:0;padding:7px;font-size:12.5px" onclick="newTpl()">+ 새 문구</button></div>
+    <div class="sub" style="margin:6px 0 0;font-size:11.5px">문구 안의 <b>{이름이}</b>는 아이 이름으로 바뀌어요 (오름 → 오름이, 시우 → 시우가). {이름} {성명}도 돼요.</div>
+  </div>
   <label class="mute"><input type="checkbox" id="kmute" onchange="setMute(this.checked)"> 🔇 소리 없이(음소거) 보내기</label>
   <button class="btn primary" id="ksend" onclick="kSend()" style="background:#fee500;border-color:#fee500;color:#191919;font-size:15px;padding:13px">💬 카톡으로 보내기</button>
 </div></div>
@@ -581,7 +595,7 @@ $('klist').addEventListener('click',e=>{ const re=e.target.closest('[data-re]');
 function openMedia(n){
   if(!window.Kakao){ toast('앱에서만 돼요'); return; }
   KK.cur=n; KK.media=null; KK.sel=new Set(); KK.done=null; KK.clips={}; KK.busy=false;
-  $('kmute').checked=getMute();
+  $('kmute').checked=getMute(); renderTpl();
   $('ktitle').textContent='💬 '+n; $('ksub').textContent='영상을 불러오는 중…'; $('kmedia').innerHTML=''; updKSend();
   $('kmodal').classList.add('on'); Kakao.listMedia(n);
 }
@@ -603,7 +617,7 @@ function renderMedia(){
 function updKSend(){
   const n=KK.sel.size, done=KK.done||(KK.cur&&sentToday(KK.cur)?{ms:SENT[KK.cur]}:null);
   $('ksend').textContent=n?(done?`💬 다시 보내기 (${n}개)`:`💬 카톡으로 보내기 (${n}개)`):'보낼 영상을 골라 주세요'; $('ksend').disabled=!n;
-  $('kdone').innerHTML=done?`<div class="box" style="margin:8px 0 0;border-color:var(--ok);display:flex;align-items:center;gap:8px"><span style="font-size:22px">✅</span><div style="flex:1"><b style="margin:0;color:var(--ok)">보내기 완료 ${hm(done.ms).split(' ')[1]}${done.cnt?` · ${done.cnt}개`:''}</b><span style="color:var(--sub)">카톡에서 못 보냈으면 아래 [다시 보내기]</span></div></div>`:'';
+  $('kdone').innerHTML=done?`<div class="box" style="margin:8px 0 0;border-color:var(--ok);display:flex;align-items:center;gap:8px"><span style="font-size:22px">✅</span><div style="flex:1"><b style="margin:0;color:var(--ok)">보내기 완료 ${hm(done.ms).split(' ')[1]}${done.cnt?` · ${done.cnt}개`:''}</b><span style="color:var(--sub)">카톡에서 못 보냈으면 아래 [다시 보내기]</span>${curMsg()&&Kakao.sendText?`<div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:7px;font-size:12.5px" onclick="Kakao.sendText(curMsg())">✉️ 문구만 따로 보내기</button><button class="btn" style="margin:0;padding:7px;font-size:12.5px" onclick="Kakao.copy(curMsg())">📋 문구 복사</button></div>`:''}</div></div>`:'';
 }
 $('kmedia').addEventListener('click',e=>{
   const pb=e.target.closest('[data-play]'); if(pb){ Kakao.playMedia(pb.dataset.play); return; }
@@ -623,10 +637,12 @@ function kSend(){
   if(edited&&Kakao.shareKakaoEdited){
     // ✂️ 구간 · 🔇 음소거 → 새 영상을 만든 뒤 보냄 (원본은 그대로)
     const list=items.map(x=>{ const c=KK.clips[x.id]; return {id:x.id,s:c?c.s:0,e:c?c.e:0,name:KK.cur}; });
-    if(Kakao.shareKakaoEdited(JSON.stringify(list),mute)){ KK.busy=true; KK.sendCnt=list.length; $('ksend').disabled=true; $('ksend').textContent='영상 만드는 중…'; }
+    const ok=Kakao.shareKakaoEditedText?Kakao.shareKakaoEditedText(JSON.stringify(list),mute,curMsg()):Kakao.shareKakaoEdited(JSON.stringify(list),mute);
+    if(ok){ KK.busy=true; KK.sendCnt=list.length; $('ksend').disabled=true; $('ksend').textContent='영상 만드는 중…'; }
     return;
   }
-  if(Kakao.shareKakao(JSON.stringify([...KK.sel]))) markSent(KK.sel.size);
+  const ok=Kakao.shareKakaoText?Kakao.shareKakaoText(JSON.stringify([...KK.sel]),curMsg()):Kakao.shareKakao(JSON.stringify([...KK.sel]));
+  if(ok) markSent(KK.sel.size);
 }
 function markSent(cnt){
   const ms=Date.now();
@@ -635,6 +651,38 @@ function markSent(cnt){
 }
 window.onKakaoExportProgress=(i,t)=>{ $('ksend').textContent=`영상 만드는 중… ${i} / ${t}`+($('kmute').checked?' (음소거)':''); };
 window.onKakaoExportDone=ok=>{ KK.busy=false; if(ok&&KK.cur) markSent(KK.sendCnt||KK.sel.size); else { toast('영상을 만들지 못했어요'); updKSend(); } };
+/* ---------- ✉️ 문구 (이름에 맞춰 자동으로 바뀜) ---------- */
+const TPL_KEY='jd2_tpl_v1';
+const TPL_DEFAULT={
+  '심사':'어머님 안녕하세요!\n편히 쉬시는 주말에 죄송합니다🙏\n{이름이} 열심히 땀 흘리며 심사에 임한 영상 보내드립니다!\n기특하게 잘 해낸 모습 보시면서 칭찬 많이 부탁드립니다!\n즐거운 주말 보내세요!🫡',
+  '수업':'어머님 안녕하세요!\n오늘 {이름이} 수업 시간에 열심히 수련한 영상 보내드립니다!\n멋지게 해낸 모습 보시고 칭찬 많이 부탁드립니다!😊',
+  '대회':'어머님 안녕하세요!\n{이름이} 대회에서 최선을 다한 영상 보내드립니다!\n끝까지 포기하지 않은 모습 많이 칭찬해 주세요!🏆',
+};
+let TPL={list:{...TPL_DEFAULT},cur:'심사',useMsg:true};
+try{ const t=JSON.parse(localStorage.getItem(TPL_KEY)); if(t&&t.list) TPL={...TPL,...t,list:{...TPL_DEFAULT,...t.list}}; }catch(e){}
+if(!TPL.list[TPL.cur]) TPL.cur=Object.keys(TPL.list)[0];
+const saveTplStore=()=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(TPL)); }catch(e){} };
+function given(n){ n=String(n).replace(/\(.*?\)/g,'').trim(); return n.length>=3?n.slice(1):n; }
+function hasBatchim(w){ const c=w.charCodeAt(w.length-1); return c>=0xAC00&&c<=0xD7A3&&(c-0xAC00)%28!==0; }
+function fillTpl(t,n){ const g=given(n), full=String(n).replace(/\(.*?\)/g,'').trim();
+  return t.replace(/\{이름이\}/g,g+(hasBatchim(g)?'이':'가')).replace(/\{이름은\}/g,g+(hasBatchim(g)?'이는':'는')).replace(/\{성명\}/g,full).replace(/\{이름\}/g,g); }
+function renderTpl(){
+  $('tchips').innerHTML=Object.keys(TPL.list).map(k=>`<button class="tchip ${k===TPL.cur?'on':''}" onclick="pickTpl('${esc(k)}')">${esc(k)}</button>`).join('');
+  $('tplname').textContent=TPL.cur; $('kusemsg').checked=TPL.useMsg!==false;
+  $('kmsg').value=KK.cur?fillTpl(TPL.list[TPL.cur]||'',KK.cur):''; KK.msgEdited=false;
+  $('kmsg').style.display=$('tchips').style.display=TPL.useMsg===false?'none':'';
+}
+function pickTpl(k){ if(KK.msgEdited&&!confirm('고친 문구가 바뀌어요. 다른 문구로 바꿀까요?')) return; TPL.cur=k; saveTplStore(); renderTpl(); }
+function setUseMsg(v){ TPL.useMsg=v; saveTplStore(); renderTpl(); }
+function saveTpl(){
+  // 화면에 보이는 문구에서 아이 이름을 다시 {이름이} 등으로 돌려서 저장 → 다른 아이에게도 맞게 바뀜
+  const n=KK.cur||'', g=given(n), full=String(n).replace(/\(.*?\)/g,'').trim(); let t=$('kmsg').value;
+  if(g){ const ig=g+(hasBatchim(g)?'이':'가'); t=t.split(full).join('{성명}').split(ig).join('{이름이}').split(g).join('{이름}'); }
+  TPL.list[TPL.cur]=t; saveTplStore(); KK.msgEdited=false; toast(`'${TPL.cur}' 문구로 저장했어요`);
+}
+function newTpl(){ const k=(prompt('새 문구 이름 (예: 승급, 생일)')||'').trim(); if(!k) return; TPL.list[k]=TPL.list[TPL.cur]||''; TPL.cur=k; saveTplStore(); renderTpl(); }
+const curMsg=()=>TPL.useMsg===false?'':$('kmsg').value.trim();
+
 const MUTE_KEY='jd2_mute_v1';
 function getMute(){ try{ const v=localStorage.getItem(MUTE_KEY); return v===null?true:v==='1'; }catch(e){ return true; } }
 function setMute(v){ try{ localStorage.setItem(MUTE_KEY,v?'1':'0'); }catch(e){} }
