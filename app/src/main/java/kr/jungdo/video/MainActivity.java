@@ -554,6 +554,7 @@ public class MainActivity extends Activity {
         if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); } else dir.mkdirs();
         final ArrayList<Uri> outs = new ArrayList<>();
         final int total = q.size();
+        lister.execute(new Runnable() { @Override public void run() { cleanOldShareCopies(); } });
         main.post(new Runnable() { @Override public void run() { exportNext(q, outs, dir, mute, total); } });
     }
 
@@ -596,11 +597,19 @@ public class MainActivity extends Activity {
                     .experimentalSetTrimOptimizationEnabled(true)   // 자를 때 앞부분만 다시 만들고 나머지는 그대로 복사 → 훨씬 빠름
                     .addListener(new Transformer.Listener() {
                         @Override public void onCompleted(Composition composition, ExportResult exportResult) {
-                            Uri fu = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out);
-                            // 카톡이 채팅방 고른 뒤 뒤에서 올릴 때도 읽을 수 있게 따로 허락 (안 하면 '전송 중'에서 멈춤)
-                            try { grantUriPermission(KAKAO, fu, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-                            outs.add(fu);
-                            exportNext(q, outs, dir, mute, total);
+                            // 갤러리(동영상 폴더 '카톡보낸영상')에 진짜 파일로 넣어서 그 주소로 보냄
+                            // → 갤러리에서 공유하는 것과 똑같아서 카톡이 '전송 중'에서 멈추지 않음
+                            lister.execute(new Runnable() {
+                                @Override public void run() {
+                                    Uri su = null;
+                                    try { su = saveShareCopy(out, total - q.size()); } catch (Exception e) { toast("보내기용 저장 실패: " + e.getMessage()); }
+                                    final Uri fsu = su;
+                                    main.post(new Runnable() { @Override public void run() {
+                                        if (fsu != null) outs.add(fsu);
+                                        exportNext(q, outs, dir, mute, total);
+                                    } });
+                                }
+                            });
                         }
                         @Override public void onError(Composition composition, ExportResult exportResult, ExportException e) {
                             toast("영상 하나를 만들지 못했어요: " + e.getMessage());
@@ -646,8 +655,7 @@ public class MainActivity extends Activity {
         }
         i.setType(type);
         if (pendingText != null && !pendingText.trim().isEmpty()) {
-            i.putExtra(Intent.EXTRA_TEXT, pendingText);   // 카톡이 받아 주면 같이 감
-            copyText(pendingText);                         // 안 받아 줘도 붙여넣기 할 수 있게
+            copyText(pendingText);   // 영상엔 글을 같이 안 붙임(카톡이 멈출 수 있음) → 채팅방에서 붙여넣기
             toast("문구가 복사됐어요. 채팅방 입력칸을 길게 눌러 '붙여넣기' 하세요");
         }
         ClipData cd = ClipData.newRawUri("media", uris.get(0));
@@ -1011,6 +1019,51 @@ public class MainActivity extends Activity {
         p.setColor(Color.WHITE);
         c.drawText(text, pad - b.left, y, p);
         return bmp;
+    }
+
+    private static final String SHARE_DIR = "Movies/카톡보낸영상";
+
+    /** 보내기용으로 만든 영상을 갤러리에 저장 (이름엔 아이 이름을 안 넣음 → 아이 앨범 목록에 안 섞임) */
+    private Uri saveShareCopy(File f, int idx) throws Exception {
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date());
+        ContentValues v = new ContentValues();
+        v.put(MediaStore.Video.Media.DISPLAY_NAME, "jd_send_" + stamp + "_" + idx + ".mp4");
+        v.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+        v.put(MediaStore.Video.Media.RELATIVE_PATH, SHARE_DIR);
+        v.put(MediaStore.Video.Media.IS_PENDING, 1);
+        ContentResolver cr = getContentResolver();
+        Uri out = cr.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v);
+        if (out == null) throw new Exception("저장 위치를 만들지 못했어요");
+        try (InputStream in = new java.io.FileInputStream(f); OutputStream os = cr.openOutputStream(out)) {
+            if (os == null) throw new Exception("파일을 열지 못했어요");
+            byte[] buf = new byte[1024 * 256];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+        } catch (Exception e) {
+            cr.delete(out, null, null);
+            throw e;
+        }
+        ContentValues done = new ContentValues();
+        done.put(MediaStore.Video.Media.IS_PENDING, 0);
+        cr.update(out, done, null, null);
+        f.delete();
+        return out;
+    }
+
+    /** 하루 넘은 보내기용 영상은 지움 (이 앱이 만든 것만) */
+    private void cleanOldShareCopies() {
+        try {
+            long cutoff = System.currentTimeMillis() / 1000 - 24 * 3600;
+            ContentResolver cr = getContentResolver();
+            try (Cursor c = cr.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    new String[]{MediaStore.Video.Media._ID},
+                    MediaStore.Video.Media.RELATIVE_PATH + " LIKE ? AND " + MediaStore.Video.Media.DISPLAY_NAME + " LIKE 'jd_send_%' AND " + MediaStore.Video.Media.DATE_ADDED + " < ?",
+                    new String[]{SHARE_DIR + "%", String.valueOf(cutoff)}, null)) {
+                if (c != null) while (c.moveToNext()) {
+                    try { cr.delete(ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, c.getLong(0)), null, null); } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private Uri copyToAlbum(InputStream in, String name, long dateMs) throws Exception {
