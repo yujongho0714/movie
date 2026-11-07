@@ -717,6 +717,14 @@ function clipSave(){
 }
 function clipClear(){ delete KK.clips[CL.id]; closeClip(); renderMedia(); }
 
+/* 업데이트 받는 중 표시 */
+window.onUpdateProgress=p=>{
+  let b=document.getElementById('updbar');
+  if(!b){ b=document.createElement('div'); b.id='updbar'; b.style.cssText='position:fixed;left:12px;right:12px;top:12px;z-index:999;background:#1f2937;color:#fff;border-radius:12px;padding:12px 14px;font-weight:800;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.35)'; document.body.appendChild(b); }
+  if(p<0){ b.remove(); return; }
+  b.innerHTML=p>=100?'✅ 다 받았어요 — 설치 화면에서 [업데이트]를 누르세요':`⬇️ 새 버전 받는 중… ${p}%<div style="height:6px;background:#374151;border-radius:3px;margin-top:8px"><div style="height:6px;width:${p}%;background:#f5c518;border-radius:3px"></div></div>`;
+  if(p>=100) setTimeout(()=>b.remove(),8000);
+};
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
 render();
 </script>

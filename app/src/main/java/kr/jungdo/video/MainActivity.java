@@ -231,8 +231,10 @@ public class MainActivity extends Activity {
     }
 
     private void downloadUpdate(final String url) {
-        toast("새 버전 받는 중…");
-        lister.execute(new Runnable() {
+        toast("새 버전 받는 중… (50MB 정도라 잠시 걸려요)");
+        js("window.onUpdateProgress&&window.onUpdateProgress(0)");
+        // 다른 작업(영상 목록 읽기 등)에 밀리지 않게 따로 받음
+        new Thread(new Runnable() {
             @Override public void run() {
                 try {
                     String u = url;
@@ -248,18 +250,26 @@ public class MainActivity extends Activity {
                     File dir = new File(getCacheDir(), "updates");
                     if (!dir.exists()) dir.mkdirs();
                     File f = new File(dir, "jungdo-video.apk");
+                    long total = c.getContentLengthLong(), got = 0; int lastPct = -1;
                     try (InputStream in = c.getInputStream(); OutputStream out = new java.io.FileOutputStream(f)) {
                         byte[] buf = new byte[256 * 1024];
                         int n;
-                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                        while ((n = in.read(buf)) > 0) {
+                            out.write(buf, 0, n);
+                            got += n;
+                            int pct = total > 0 ? (int) (got * 100 / total) : -1;
+                            if (pct != lastPct && pct >= 0) { lastPct = pct; js("window.onUpdateProgress&&window.onUpdateProgress(" + pct + ")"); }
+                        }
                     }
                     updateFile = f;
+                    js("window.onUpdateProgress&&window.onUpdateProgress(100)");
                     main.post(new Runnable() { @Override public void run() { installUpdate(); } });
                 } catch (Exception e) {
+                    js("window.onUpdateProgress&&window.onUpdateProgress(-1)");
                     toast("업데이트를 받지 못했어요: " + e.getMessage());
                 }
             }
-        });
+        }).start();
     }
 
     private void installUpdate() {
