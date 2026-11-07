@@ -42,6 +42,9 @@ import androidx.core.content.FileProvider;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.C;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.audio.AudioProcessor;
+import androidx.media3.common.audio.ChannelMixingAudioProcessor;
+import androidx.media3.common.audio.ChannelMixingMatrix;
 import androidx.media3.effect.BitmapOverlay;
 import androidx.media3.effect.OverlayEffect;
 import androidx.media3.effect.OverlaySettings;
@@ -74,6 +77,7 @@ import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -565,14 +569,24 @@ public class MainActivity extends Activity {
                 if (eMs > sMs) cb.setEndPositionMs(eMs);
                 mb.setClippingConfiguration(cb.build());
             }
-            EditedMediaItem item = new EditedMediaItem.Builder(mb.build()).setRemoveAudio(mute).build();
+            // 음소거: 소리 트랙을 아예 빼면 카톡이 영상 처리에서 멈추는 경우가 있어서, 트랙은 두고 소리만 0으로 만듦
+            EditedMediaItem.Builder eb = new EditedMediaItem.Builder(mb.build());
+            if (mute) {
+                ChannelMixingAudioProcessor silent = new ChannelMixingAudioProcessor();
+                for (int ch = 1; ch <= 8; ch++) silent.putChannelMixingMatrix(new ChannelMixingMatrix(ch, ch, new float[ch * ch]));
+                eb.setEffects(new Effects(Collections.<AudioProcessor>singletonList(silent), Collections.<androidx.media3.common.Effect>emptyList()));
+            }
+            EditedMediaItem item = eb.build();
             String nm = it.optString("name", "video").replaceAll("[\\\\/:*?\"<>|]", "_");
             final File out = new File(dir, nm + "_" + (total - q.size()) + ".mp4");
             Transformer t = new Transformer.Builder(this)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
                     .addListener(new Transformer.Listener() {
                         @Override public void onCompleted(Composition composition, ExportResult exportResult) {
-                            outs.add(FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out));
+                            Uri fu = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out);
+                            // 카톡이 채팅방 고른 뒤 뒤에서 올릴 때도 읽을 수 있게 따로 허락 (안 하면 '전송 중'에서 멈춤)
+                            try { grantUriPermission(KAKAO, fu, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                            outs.add(fu);
                             exportNext(q, outs, dir, mute, total);
                         }
                         @Override public void onError(Composition composition, ExportResult exportResult, ExportException e) {
