@@ -151,6 +151,16 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
         <div class="sub" style="margin-top:8px">이름을 길게 누르면 명단에서 삭제돼요.</div>
       </div>
     </details>
+    <details id="sibbox">
+      <summary>👨‍👩‍👧 형제 묶음 <span id="sibcnt"></span></summary>
+      <div class="box">
+        <div class="sub" style="margin-bottom:8px">형제는 카톡 보낼 때 한 번에 같이 보내져요. 형제 중 오늘 안 찍은 아이는 빼고 찍은 아이만 보내요.</div>
+        <label class="btn primary" style="display:block;text-align:center">📊 엑셀로 형제명단 올리기 (바뀐 것 적용)<input type="file" id="sibfile" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="sibImport(this)"></label>
+        <div class="sub" style="margin:6px 0">엑셀은 한 칸(세로줄)에 형제 이름을 위아래로 쓰면 돼요. 지금 쓰는 '형제명단' 엑셀 그대로 올리면 돼요.</div>
+        <div style="display:flex;gap:6px"><input type="text" id="sibadd" placeholder="직접 추가: 장윤우, 장연우" style="flex:1"><button class="btn" style="width:auto;margin:0" onclick="sibAddOne()">추가</button></div>
+        <div id="siblist" style="margin-top:8px"></div>
+      </div>
+    </details>
   </section>
 
   <!-- ② 촬영 -->
@@ -227,7 +237,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <div class="sub" id="ksub" style="margin:6px 0 0"></div>
   <div id="kdone"></div>
   <div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="margin:0;padding:8px" onclick="kSelect('today')">오늘 찍은 것</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('all')">전체 선택</button><button class="btn" style="margin:0;padding:8px" onclick="kSelect('none')">선택 해제</button></div>
-  <div class="names"><div class="kgrid" id="kmedia"></div></div>
+  <div id="kmiss"></div><div class="names"><div class="kgrid" id="kmedia"></div></div>
   <div class="msgbox">
     <div style="display:flex;align-items:center;gap:6px"><b style="flex:1">✉️ 같이 보낼 문구</b><label style="font-size:12.5px;font-weight:700"><input type="checkbox" id="kusemsg" onchange="setUseMsg(this.checked)"> 보내기</label></div>
     <div class="tchips" id="tchips"></div>
@@ -256,6 +266,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 <input type="file" id="cam" accept="video/*" capture="environment" style="display:none">
 <div id="toast"></div>
 
+<script src="xlsx.mini.min.js"></script>
 <script>
 const ROSTER = {"유치부": ["김도아", "김오름", "정연아", "김시우(유치부)"], "1학년": ["김나연", "김해솔", "박윤", "배도준", "오하람", "오하율", "유다현", "육지훈", "이도훈", "이준후", "김윤찬"], "2학년": ["김나윤", "김동현", "김이준", "김정현", "류시우", "박서준", "박유민", "박하윤", "배찬우", "송소은", "신혜성", "엄태준", "오하진", "이동율", "이라율", "이상효", "이시아", "이유빈", "이주호", "정다현", "정연우", "정이도", "조예준", "지윤채", "최서은", "편소이", "허윤", "조예린", "김온유", "김서진", "강주훈"], "3학년": ["곽시연", "김민성", "김시우", "김연중", "김유찬", "김지운", "남광연", "박건", "서재윤", "신수호", "유이준", "유정우", "유준혁", "이지후", "이태양", "장연우", "최다온", "홍시우", "강시우", "김서율", "김한보리", "장라온"], "4학년": ["곽소이", "김동준", "류승우", "방서영", "상하윤", "송준호", "육지호", "윤서진", "이동윤", "이상훈", "이지우", "장수현", "표재원", "조경찬"], "5학년": ["곽리온", "김서중", "김지오", "신서우", "위연주", "장윤우", "정지우", "권자윤"], "6학년": ["김하빈", "송지혁", "양하온", "양하준", "이상호", "이아름", "이주아", "장원준", "표재영"], "중학생": ["곽아인", "이상민"]};
 const GRADES = Object.keys(ROSTER);
@@ -539,6 +550,57 @@ function bulkSave(){
   saving+=ids.length; sdirty=false; renderSort(); toast(`${ids.length}개 저장을 시작했어요`);
 }
 
+
+/* ---------- 👨‍👩‍👧 형제 묶음 (엑셀로 수시로 바꿈) ---------- */
+const SIB_KEY='jd2_sib_v1';
+const SIB_DEFAULT=[["장윤우","장연우"],["정연아","정연우"],["김동현","김동준"],["이상효","이상훈"],["김온유","김한보리"],["오하람","오하율"],["박건","박윤"],["육지훈","육지호"],["표재영","표재원"],["곽시연","곽리온","곽아인"],["이상민","이상호"],["양하온","양하준"],["류승우","류시우"],["이동율","이동윤"]];
+let SIB=null; try{ SIB=JSON.parse(localStorage.getItem(SIB_KEY)); }catch(e){}
+if(!Array.isArray(SIB)) SIB=SIB_DEFAULT.map(g=>[...g]);
+const saveSib=()=>{ try{ localStorage.setItem(SIB_KEY,JSON.stringify(SIB)); }catch(e){} renderSib(); };
+const plainName=n=>String(n).replace(/\(.*?\)/g,'').trim();
+function rosterName(x){ const all=allNames(); if(all.includes(x)) return x; const c=all.filter(n=>plainName(n)===plainName(x)); return c.length===1?c[0]:x; }
+function sibsOf(n){ const g=SIB.find(gr=>gr.some(x=>rosterName(x)===n)); return g?g.map(rosterName).filter(x=>x!==n):[]; }
+function renderSib(){
+  if(!$('siblist')) return;
+  const all=new Set(allNames());
+  $('sibcnt').textContent=`(${SIB.length}묶음)`;
+  $('siblist').innerHTML=SIB.map((g,i)=>`<div class="row" style="padding:8px 10px"><span class="nm">${g.map(x=>all.has(rosterName(x))?esc(x):`<span style="color:var(--bad,#dc2626)" title="명단에 없는 이름">${esc(x)}?</span>`).join(' · ')}</span><button class="kk" style="background:var(--soft);border-color:var(--line);color:var(--ink)" onclick="sibDel(${i})">빼기</button></div>`).join('')||'<div class="sub">형제 묶음이 없어요</div>';
+}
+function sibDel(i){ if(!confirm(SIB[i].join(', ')+' 형제 묶음을 뺄까요?')) return; SIB.splice(i,1); saveSib(); }
+function sibAddOne(){
+  const names=$('sibadd').value.split(/[,·\s]+/).map(x=>x.trim()).filter(Boolean);
+  if(names.length<2){ toast('이름을 2명 이상 쉼표로 써 주세요'); return; }
+  SIB=SIB.filter(g=>!g.some(x=>names.includes(x))); SIB.push(names); $('sibadd').value=''; saveSib(); toast('형제 묶음을 추가했어요');
+}
+/** 엑셀 읽기: 세로줄마다 형제 (가로줄로 쓴 엑셀도 알아서) */
+function sibParse(rows){
+  const isName=v=>typeof v==='string'&&/^[가-힣]{2,5}(\(.+\))?$/.test(v.trim())&&!/명단|형제|이름|학년/.test(v);
+  const cols={}; rows.forEach(r=>(r||[]).forEach((v,c)=>{ if(isName(v)) (cols[c]=cols[c]||[]).push(v.trim()); }));
+  let groups=Object.values(cols).filter(g=>g.length>=2);
+  const byRow=rows.map(r=>(r||[]).filter(isName).map(v=>v.trim())).filter(g=>g.length>=2);
+  // 세로로 묶은 게 하나도 없고 가로로 묶은 게 있으면 가로 기준
+  if(!groups.length||(byRow.length>groups.length&&byRow.every(g=>g.length<=4))) groups=byRow.length?byRow:groups;
+  return groups;
+}
+function sibImport(inp){
+  const f=inp.files&&inp.files[0]; inp.value=''; if(!f) return;
+  if(!window.XLSX){ toast('엑셀 도구를 못 불러왔어요'); return; }
+  const rd=new FileReader();
+  rd.onload=()=>{ try{
+    const wb=XLSX.read(new Uint8Array(rd.result),{type:'array'});
+    let groups=[]; wb.SheetNames.forEach(n=>{ const g=sibParse(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:null})); if(g.length>groups.length) groups=g; });
+    if(!groups.length){ toast('엑셀에서 형제 이름을 못 찾았어요'); return; }
+    const key=g=>[...g].sort().join(','), oldK=new Set(SIB.map(key)), newK=new Set(groups.map(key));
+    const added=groups.filter(g=>!oldK.has(key(g))), removed=SIB.filter(g=>!newK.has(key(g)));
+    const all=new Set(allNames()), unknown=[...new Set(groups.flat().filter(x=>!all.has(rosterName(x))))];
+    if(!added.length&&!removed.length){ toast('바뀐 게 없어요 ('+groups.length+'묶음)'); return; }
+    if(!confirm(`형제명단 ${groups.length}묶음으로 바꿀까요?\n\n새로 생김 ${added.length}: ${added.map(g=>g.join('·')).join(', ')||'-'}\n없어짐 ${removed.length}: ${removed.map(g=>g.join('·')).join(', ')||'-'}${unknown.length?`\n\n⚠ 촬영 명단에 없는 이름: ${unknown.join(', ')}`:''}`)) return;
+    SIB=groups; saveSib(); toast('형제명단을 바꿨어요');
+  }catch(e){ toast('엑셀을 읽지 못했어요: '+e.message); } };
+  rd.readAsArrayBuffer(f);
+}
+renderSib();
+
 /* ---------- 💬 카톡 보내기 ---------- */
 const SENT_KEY='jd2_sent_v1';
 let SENT={}; try{ SENT=JSON.parse(localStorage.getItem(SENT_KEY))||{}; }catch(e){}
@@ -595,23 +657,41 @@ $('klist').addEventListener('click',e=>{ const re=e.target.closest('[data-re]');
 function openMedia(n){
   if(!window.Kakao){ toast('앱에서만 돼요'); return; }
   KK.cur=n; KK.media=null; KK.sel=new Set(); KK.done=null; KK.clips={}; KK.busy=false;
+  KK.names=[n,...sibsOf(n)]; KK.mediaBy={}; KK.wait=new Set(KK.names); KK.missing=[]; KK.msgNames=[n];
   $('kmute').checked=getMute(); renderTpl();
-  $('ktitle').textContent='💬 '+n; $('ksub').textContent='영상을 불러오는 중…'; $('kmedia').innerHTML=''; updKSend();
-  $('kmodal').classList.add('on'); Kakao.listMedia(n);
+  $('ktitle').textContent='💬 '+KK.names.join(' · '); $('ksub').textContent=KK.names.length>1?'형제 영상까지 찾는 중…':'영상을 불러오는 중…'; $('kmedia').innerHTML=''; updKSend();
+  $('kmodal').classList.add('on'); KK.names.forEach(x=>Kakao.listMedia(x));
 }
 function closeMedia(){ $('kmodal').classList.remove('on'); KK.cur=null; KK.done=null; if(S.view==='kakao') renderKakao(); else if(S.view==='shoot') renderShoot(); }
 window.onKakaoMedia=(n,arr)=>{
-  if(n!==KK.cur) return; KK.media=arr||[];
-  const now=Date.now(), today=KK.media.filter(m=>sameDay(m.ms,now));
+  if(!KK.cur||!KK.names||!KK.names.includes(n)||!KK.wait.has(n)) return;
+  KK.mediaBy[n]=(arr||[]).map(m=>({...m,owner:n})); KK.wait.delete(n);
+  if(KK.wait.size){ $('ksub').textContent=`형제 영상까지 찾는 중… (${KK.names.length-KK.wait.size}/${KK.names.length})`; return; }
+  const now=Date.now(), todayOf=x=>(KK.mediaBy[x]||[]).filter(m=>sameDay(m.ms,now));
+  const shot=KK.names.filter(x=>todayOf(x).length);
+  // 형제 중 오늘 찍은 아이만 같이 보냄. 아무도 오늘 안 찍었으면 누른 아이 것만 (가장 최근 1개)
+  const use=shot.length?shot:[KK.cur];
+  KK.missing=KK.names.filter(x=>!use.includes(x));
+  const seen=new Set(); KK.media=use.flatMap(x=>KK.mediaBy[x]||[]).filter(m=>!seen.has(m.id)&&seen.add(m.id)).sort((a,b)=>b.ms-a.ms);
+  const today=KK.media.filter(m=>sameDay(m.ms,now));
   KK.sel=new Set((today.length?today:KK.media.slice(0,1)).map(m=>m.id));
-  renderMedia();
+  $('ktitle').textContent='💬 '+use.join(' · ');
+  syncMsgNames(); renderMedia();
 };
+/** 고른 영상의 아이들 이름으로 문구를 맞춤 (직접 고친 문구는 그대로) */
+function syncMsgNames(){
+  const own=KK.names.filter(x=>(KK.media||[]).some(m=>KK.sel.has(m.id)&&m.owner===x));
+  const names=own.length?own:[KK.cur];
+  if(names.join()!==(KK.msgNames||[]).join()){ KK.msgNames=names; if(!KK.msgEdited) renderTpl(); }
+}
 function renderMedia(){
   const m=KK.media||[];
+  const miss=(KK.missing||[]).length&&KK.names.length>1?`<div class="box" style="margin:0 0 8px;border-color:var(--warn,#d97706)">📌 <b style="display:inline">${KK.missing.map(esc).join(', ')}</b>${KK.missing.length>1?'는':(hasBatchim(given(KK.missing[0]))?'은':'는')} 아직 촬영하지 않았어요 — ${esc(KK.names.filter(x=>!KK.missing.includes(x)).join(', '))} 영상만 보내요</div>`:'';
+  $('kmiss')&&($('kmiss').innerHTML=miss);
   $('ksub').textContent=m.length?`찾은 영상 ${m.length}개 · 최신순 · ${m.some(x=>sameDay(x.ms,Date.now()))?'오늘 찍은 것이 미리 골라져 있어요':'오늘 찍은 게 없어서 가장 최근 1개를 골라뒀어요'}`:'이 아이 이름이 붙은 폴더·영상을 못 찾았어요';
   $('kmedia').innerHTML=m.map(x=>{ const on=KK.sel.has(x.id), sec=x.dur?Math.round(x.dur/1000)+'초':'';
     const cl=KK.clips[x.id];
-    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span><button class="pl" data-play="${x.id}">▶</button>${x.video&&Kakao.frameAt?`<button class="cut" data-cut="${x.id}">✂️</button>`:''}${cl?`<div class="cb"><span>✂️ ${mmss(cl.s)}~${mmss(cl.e)}</span></div>`:''}<div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}${x.folder?`<br>📁 ${esc(x.folder.split('/').slice(-2).join('/'))}`:''}</div></div>`; }).join('');
+    return `<div class="kc ${on?'on':''}" data-id="${x.id}">${x.thumb?`<img src="${x.thumb}">`:`<div class="ph">${x.video?'🎬':'🖼️'}</div>`}<span class="ck">${on?'✓':''}</span>${KK.names&&KK.names.length>1&&x.owner?`<span style="position:absolute;left:6px;bottom:34px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:800;padding:2px 6px;border-radius:6px">${esc(given(x.owner))}</span>`:''}<button class="pl" data-play="${x.id}">▶</button>${x.video&&Kakao.frameAt?`<button class="cut" data-cut="${x.id}">✂️</button>`:''}${cl?`<div class="cb"><span>✂️ ${mmss(cl.s)}~${mmss(cl.e)}</span></div>`:''}<div class="mt">${esc(x.date)}${sec?' · '+sec:''}${x.mb?' · '+x.mb+'MB':''}${x.folder?`<br>📁 ${esc(x.folder.split('/').slice(-2).join('/'))}`:''}</div></div>`; }).join('');
   updKSend();
 }
 function updKSend(){
@@ -623,11 +703,11 @@ $('kmedia').addEventListener('click',e=>{
   const pb=e.target.closest('[data-play]'); if(pb){ Kakao.playMedia(pb.dataset.play); return; }
   const cb=e.target.closest('[data-cut]'); if(cb){ openClip(cb.dataset.cut); return; }
   const c=e.target.closest('.kc'); if(!c) return; const id=c.dataset.id;
-  KK.sel.has(id)?KK.sel.delete(id):KK.sel.add(id); renderMedia();
+  KK.sel.has(id)?KK.sel.delete(id):KK.sel.add(id); syncMsgNames(); renderMedia();
 });
 function kSelect(w){ const m=KK.media||[], now=Date.now();
   KK.sel=new Set(w==='all'?m.map(x=>x.id):w==='today'?m.filter(x=>sameDay(x.ms,now)).map(x=>x.id):[]);
-  if(w==='today'&&!KK.sel.size) toast('오늘 찍은 영상이 없어요'); renderMedia(); }
+  if(w==='today'&&!KK.sel.size) toast('오늘 찍은 영상이 없어요'); syncMsgNames(); renderMedia(); }
 function kSend(){
   if(!KK.sel.size||!KK.cur||KK.busy) return;
   const items=(KK.media||[]).filter(x=>KK.sel.has(x.id));
@@ -636,7 +716,7 @@ function kSend(){
   if(!edited&&mb>300&&!confirm(`고른 영상이 ${Math.round(mb)}MB예요. 카톡에서 너무 크면 안 보내질 수 있어요. 그래도 보낼까요?`)) return;
   if(edited&&Kakao.shareKakaoEdited){
     // ✂️ 구간 · 🔇 음소거 → 새 영상을 만든 뒤 보냄 (원본은 그대로)
-    const list=items.map(x=>{ const c=KK.clips[x.id]; return {id:x.id,s:c?c.s:0,e:c?c.e:0,name:KK.cur}; });
+    const list=items.map(x=>{ const c=KK.clips[x.id]; return {id:x.id,s:c?c.s:0,e:c?c.e:0,name:x.owner||KK.cur}; });
     const ok=Kakao.shareKakaoEditedText?Kakao.shareKakaoEditedText(JSON.stringify(list),mute,curMsg()):Kakao.shareKakaoEdited(JSON.stringify(list),mute);
     if(ok){ KK.busy=true; KK.sendCnt=list.length; $('ksend').disabled=true; $('ksend').textContent='영상 만드는 중…'; }
     return;
@@ -646,7 +726,10 @@ function kSend(){
 }
 function markSent(cnt){
   const ms=Date.now();
-  SENT[KK.cur]=ms; SLOG.push({n:KK.cur,ms,cnt}); saveSent();
+  // 형제를 같이 보냈으면 영상이 들어간 아이 모두 '보내기 완료'
+  const items=(KK.media||[]).filter(x=>KK.sel.has(x.id));
+  const who=KK.names&&KK.names.length>1?KK.names.filter(n=>items.some(x=>x.owner===n)):[KK.cur];
+  (who.length?who:[KK.cur]).forEach(n=>{ SENT[n]=ms; SLOG.push({n,ms,cnt:items.filter(x=>!x.owner||x.owner===n).length||cnt}); }); saveSent();
   KK.done={ms,cnt}; updKSend();   // 창은 그대로 두고 '보내기 완료' 표시 → 카톡에서 돌아오면 바로 보임
 }
 window.onKakaoExportProgress=(i,t)=>{ $('ksend').textContent=`영상 만드는 중… ${i} / ${t}`+($('kmute').checked?' (음소거)':''); };
@@ -664,20 +747,24 @@ if(!TPL.list[TPL.cur]) TPL.cur=Object.keys(TPL.list)[0];
 const saveTplStore=()=>{ try{ localStorage.setItem(TPL_KEY,JSON.stringify(TPL)); }catch(e){} };
 function given(n){ n=String(n).replace(/\(.*?\)/g,'').trim(); return n.length>=3?n.slice(1):n; }
 function hasBatchim(w){ const c=w.charCodeAt(w.length-1); return c>=0xAC00&&c<=0xD7A3&&(c-0xAC00)%28!==0; }
-function fillTpl(t,n){ const g=given(n), full=String(n).replace(/\(.*?\)/g,'').trim();
+function fillTpl(t,n){
+  if(Array.isArray(n)){ if(n.length<2) n=n[0]||''; else { const gs=n.map(given), last=gs[gs.length-1], g=gs.join(', '), full=n.map(x=>String(x).replace(/\(.*?\)/g,'').trim()).join(', ');
+    return t.replace(/\{이름이\}/g,g+(hasBatchim(last)?'이':'가')).replace(/\{이름은\}/g,g+(hasBatchim(last)?'이는':'는')).replace(/\{성명\}/g,full).replace(/\{이름\}/g,g); } }
+  const g=given(n), full=String(n).replace(/\(.*?\)/g,'').trim();
   return t.replace(/\{이름이\}/g,g+(hasBatchim(g)?'이':'가')).replace(/\{이름은\}/g,g+(hasBatchim(g)?'이는':'는')).replace(/\{성명\}/g,full).replace(/\{이름\}/g,g); }
 function renderTpl(){
   $('tchips').innerHTML=Object.keys(TPL.list).map(k=>`<button class="tchip ${k===TPL.cur?'on':''}" onclick="pickTpl('${esc(k)}')">${esc(k)}</button>`).join('');
   $('tplname').textContent=TPL.cur; $('kusemsg').checked=TPL.useMsg!==false;
-  $('kmsg').value=KK.cur?fillTpl(TPL.list[TPL.cur]||'',KK.cur):''; KK.msgEdited=false;
+  $('kmsg').value=KK.cur?fillTpl(TPL.list[TPL.cur]||'',KK.msgNames&&KK.msgNames.length?KK.msgNames:KK.cur):''; KK.msgEdited=false;
   $('kmsg').style.display=$('tchips').style.display=TPL.useMsg===false?'none':'';
 }
 function pickTpl(k){ if(KK.msgEdited&&!confirm('고친 문구가 바뀌어요. 다른 문구로 바꿀까요?')) return; TPL.cur=k; saveTplStore(); renderTpl(); }
 function setUseMsg(v){ TPL.useMsg=v; saveTplStore(); renderTpl(); }
 function saveTpl(){
   // 화면에 보이는 문구에서 아이 이름을 다시 {이름이} 등으로 돌려서 저장 → 다른 아이에게도 맞게 바뀜
-  const n=KK.cur||'', g=given(n), full=String(n).replace(/\(.*?\)/g,'').trim(); let t=$('kmsg').value;
-  if(g){ const ig=g+(hasBatchim(g)?'이':'가'); t=t.split(full).join('{성명}').split(ig).join('{이름이}').split(g).join('{이름}'); }
+  const ns=KK.msgNames&&KK.msgNames.length?KK.msgNames:[KK.cur||''];
+  const g=ns.map(given).join(', '), full=ns.map(x=>String(x).replace(/\(.*?\)/g,'').trim()).join(', '), last=given(ns[ns.length-1]); let t=$('kmsg').value;
+  if(g){ const ig=g+(hasBatchim(last)?'이':'가'); t=t.split(full).join('{성명}').split(ig).join('{이름이}').split(g).join('{이름}'); }
   TPL.list[TPL.cur]=t; saveTplStore(); KK.msgEdited=false; toast(`'${TPL.cur}' 문구로 저장했어요`);
 }
 function newTpl(){ const k=(prompt('새 문구 이름 (예: 승급, 생일)')||'').trim(); if(!k) return; TPL.list[k]=TPL.list[TPL.cur]||''; TPL.cur=k; saveTplStore(); renderTpl(); }

@@ -91,6 +91,8 @@ public class MainActivity extends Activity {
     private static final int REQ_VIDEO = 1;
     private static final int REQ_PICK = 2;
     private static final int REQ_MEDIA = 3;
+    private static final int REQ_FILE = 4;
+    private android.webkit.ValueCallback<Uri[]> fileCb;
     private static final String KAKAO = "com.kakao.talk";
 
     // 카톡 보내기용으로 보여준 영상들 (id -> uri, 종류)
@@ -136,6 +138,18 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "Android");
         web.addJavascriptInterface(new KakaoBridge(), "Kakao");
         web.setWebChromeClient(new WebChromeClient() {
+            // 화면의 <input type=file> (형제명단 엑셀 올리기 등) → 파일 고르기 창
+            @Override
+            public boolean onShowFileChooser(WebView v, android.webkit.ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (fileCb != null) fileCb.onReceiveValue(null);
+                fileCb = cb;
+                try {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                    startActivityForResult(Intent.createChooser(i, "파일 고르기"), REQ_FILE);
+                } catch (Exception e) { fileCb = null; cb.onReceiveValue(null); return false; }
+                return true;
+            }
+
             @Override
             public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
                 new AlertDialog.Builder(MainActivity.this)
@@ -850,6 +864,11 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_VIDEO) onVideoResult(resultCode, data);
         else if (requestCode == REQ_PICK) onPickResult(resultCode, data);
+        else if (requestCode == REQ_FILE && fileCb != null) {
+            Uri u = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
+            fileCb.onReceiveValue(u != null ? new Uri[]{u} : null);
+            fileCb = null;
+        }
     }
 
     private void onVideoResult(int resultCode, Intent data) {
