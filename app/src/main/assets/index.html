@@ -667,14 +667,14 @@ window.onKakaoMedia=(n,arr)=>{
   if(!KK.cur||!KK.names||!KK.names.includes(n)||!KK.wait.has(n)) return;
   KK.mediaBy[n]=(arr||[]).map(m=>({...m,owner:n})); KK.wait.delete(n);
   if(KK.wait.size){ $('ksub').textContent=`형제 영상까지 찾는 중… (${KK.names.length-KK.wait.size}/${KK.names.length})`; return; }
-  const now=Date.now(), todayOf=x=>(KK.mediaBy[x]||[]).filter(m=>sameDay(m.ms,now));
-  const shot=KK.names.filter(x=>todayOf(x).length);
-  // 형제 중 오늘 찍은 아이만 같이 보냄. 아무도 오늘 안 찍었으면 누른 아이 것만 (가장 최근 1개)
-  const use=shot.length?shot:[KK.cur];
+  // 형제 중 영상이 하나라도 있는 아이는 같이 보냄 (영상이 아예 없는 아이만 '아직 촬영하지 않았어요')
+  // 아이마다 가장 최근에 찍은 날의 영상이 미리 골라짐 (오늘 찍었으면 오늘 것)
+  const use=KK.names.filter(x=>(KK.mediaBy[x]||[]).length);
+  if(!use.length) use.push(KK.cur);
   KK.missing=KK.names.filter(x=>!use.includes(x));
   const seen=new Set(); KK.media=use.flatMap(x=>KK.mediaBy[x]||[]).filter(m=>!seen.has(m.id)&&seen.add(m.id)).sort((a,b)=>b.ms-a.ms);
-  const today=KK.media.filter(m=>sameDay(m.ms,now));
-  KK.sel=new Set((today.length?today:KK.media.slice(0,1)).map(m=>m.id));
+  KK.sel=new Set();
+  use.forEach(x=>{ const list=(KK.mediaBy[x]||[]).slice().sort((a,b)=>b.ms-a.ms); if(!list.length) return; const lastDay=list[0].ms; list.filter(m=>sameDay(m.ms,lastDay)).forEach(m=>KK.sel.add(m.id)); });
   $('ktitle').textContent='💬 '+use.join(' · ');
   syncMsgNames(); renderMedia();
 };
@@ -687,7 +687,9 @@ function syncMsgNames(){
 function renderMedia(){
   const m=KK.media||[];
   const miss=(KK.missing||[]).length&&KK.names.length>1?`<div class="box" style="margin:0 0 8px;border-color:var(--warn,#d97706)">📌 <b style="display:inline">${KK.missing.map(esc).join(', ')}</b>${KK.missing.length>1?'는':(hasBatchim(given(KK.missing[0]))?'은':'는')} 아직 촬영하지 않았어요 — ${esc(KK.names.filter(x=>!KK.missing.includes(x)).join(', '))} 영상만 보내요</div>`:'';
-  $('kmiss')&&($('kmiss').innerHTML=miss);
+  const old=KK.names&&KK.names.length>1?KK.names.filter(x=>!(KK.missing||[]).includes(x)&&(KK.mediaBy[x]||[]).length&&!(KK.mediaBy[x]||[]).some(mm=>sameDay(mm.ms,Date.now()))):[];
+  const oldBox=old.length?`<div class="box" style="margin:0 0 8px">🗓️ ${old.map(x=>`${esc(given(x))}${hasBatchim(given(x))?"은":"는"} 오늘 영상이 없어서 마지막으로 찍은 날(${(()=>{const d=new Date(Math.max(...KK.mediaBy[x].map(mm=>mm.ms)));return (d.getMonth()+1)+'/'+d.getDate();})()}) 영상을 골라뒀어요`).join('<br>')}</div>`:'';
+  $('kmiss')&&($('kmiss').innerHTML=miss+oldBox);
   $('ksub').textContent=m.length?`찾은 영상 ${m.length}개 · 최신순 · ${m.some(x=>sameDay(x.ms,Date.now()))?'오늘 찍은 것이 미리 골라져 있어요':'오늘 찍은 게 없어서 가장 최근 1개를 골라뒀어요'}`:'이 아이 이름이 붙은 폴더·영상을 못 찾았어요';
   $('kmedia').innerHTML=m.map(x=>{ const on=KK.sel.has(x.id), sec=x.dur?Math.round(x.dur/1000)+'초':'';
     const cl=KK.clips[x.id];
