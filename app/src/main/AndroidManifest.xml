@@ -3,6 +3,10 @@
 
     <!-- 새 버전 자동 업데이트 (깃허브에서 받아 설치) -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 앱 안에서 직접 찍기 (노래 틀면서) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- 이름별 앨범 영상을 읽어서 카톡으로 보내기 (직접 옮긴 영상까지 보려면 필요) -->
@@ -43,5 +47,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".RecordActivity"
+            android:exported="false"
+            android:screenOrientation="unspecified"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
     </application>
 </manifest>

@@ -139,6 +139,17 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 .tchips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
 .tchip{border:1px solid var(--line);background:var(--soft);border-radius:999px;padding:5px 11px;font-size:12.5px;font-weight:700;color:var(--ink)}
 .tchip.on{background:var(--accent);border-color:var(--accent);color:#141414}
+/* 심사 종류 · 노래 */
+.mode{display:flex;gap:8px;margin:10px 0}
+.mode button{flex:1;padding:14px 8px;border-radius:14px;border:2px solid var(--line);background:var(--soft);font-weight:800;font-size:16px;color:var(--ink)}
+.mode button.on{background:var(--accent);border-color:var(--accent);color:#141414}
+.mode button small{display:block;font-size:11px;font-weight:600;opacity:.8;margin-top:3px}
+.songs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.songs button{border:2px solid var(--line);background:var(--soft);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;color:var(--ink)}
+.songs button.on{background:#8b55e0;border-color:#8b55e0;color:#fff}
+.nowsong{font-size:15px;font-weight:800}
+.pass{font-size:11.5px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:8px;padding:2px 7px;margin-left:4px}
+.pass.keep{color:#92400e;background:#fef3c7}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:1000;opacity:0;transition:opacity .2s;max-width:90%;text-align:center;pointer-events:none}
 </style>
 </head>
@@ -148,7 +159,8 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <!-- ① 출석 체크 -->
   <section id="v-check">
     <h1>🥋 ① 출석 체크</h1>
-    <div class="sub">이번 타임에 온 아이들을 눌러 체크하세요. 체크한 아이들만 촬영 목록에 떠요.</div>
+    <div class="sub">먼저 심사 종류를 고르고, 이번 타임에 온 아이들을 눌러 체크하세요.</div>
+    <div class="mode" id="modebox"></div>
     <div id="unshot-entry"></div>
     <div id="missed-banner"></div>
     <div id="sort-entry"></div>
@@ -164,6 +176,18 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
         <button class="btn primary" onclick="addOne()">+ 추가</button>
         <button class="btn" onclick="resetRoster()">명단 처음 상태로 되돌리기</button>
         <div class="sub" style="margin-top:8px">이름을 길게 누르면 명단에서 삭제돼요.</div>
+      </div>
+    </details>
+    <details id="attbox">
+      <summary>출결 앱 연결 (태권도 합격하면 띠 올리기) <span id="attst"></span></summary>
+      <div class="box">
+        <div class="sub" style="margin-bottom:8px">출결 앱의 <b>연결 코드</b>(JD1-…)와 원장님 출결 계정을 한 번만 넣어 두면, 태권도 심사 영상을 [완료 · 저장]할 때 그 아이 띠가 한 단계 올라가요. 빨검띠 · 1품 · 2품 · 3품은 그대로예요.</div>
+        <input type="text" id="at-code" placeholder="연결 코드 JD1-…">
+        <input type="email" id="at-email" placeholder="출결 계정 이메일" style="margin-top:6px">
+        <input type="password" id="at-pw" placeholder="비밀번호" style="margin-top:6px">
+        <button class="btn primary" onclick="atSave()">연결하기</button>
+        <div class="sub" id="at-msg" style="margin-top:6px"></div>
+        <div id="promo-left"></div>
       </div>
     </details>
     <details id="sibbox">
@@ -182,6 +206,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <section id="v-shoot">
     <h1>🎥 ② 영상촬영</h1>
     <div class="sub" id="shoot-sub"></div>
+    <div class="box" id="songbox"></div>
     <div id="dirbox"></div>
     <div id="prog-text" style="font-weight:800;font-size:14px"></div>
     <div class="prog"><i id="prog-bar"></i></div>
@@ -228,7 +253,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
 <div class="bar" id="bar-check"><div class="in">
   <span class="info" id="chk-info">0명</span>
   <button class="btn" onclick="clearChecks()" style="flex:none;width:auto;padding:11px 14px">해제</button>
-  <button class="btn primary" id="start-btn" onclick="startShoot()">영상촬영 시작 ▶</button>
+  <button class="btn primary" id="start-btn" onclick="startShoot()">심사 시작 ▶</button>
 </div></div>
 <div class="bar" id="bar-shoot"><div class="in">
   <button class="btn" onclick="backToCheck()" style="flex:none;width:auto;padding:11px 14px">← 체크 수정</button>
@@ -316,6 +341,7 @@ function render(){
 
 /* ---------- ① 체크 ---------- */
 function renderCheck(){
+  renderMode(); try{ renderAtt(); }catch(e){}
   const total=allNames().length;
   $('tabs').innerHTML=['전체',...GRADES].map(g=>{
     const n=g==='전체'?total:(data[g]||[]).length, c=(g==='전체'?S.checked:S.checked.filter(x=>gradeOf(x)===g)).length;
@@ -332,7 +358,8 @@ function renderCheck(){
   });
   $('check-list').innerHTML=html||'<div class="empty">조건에 맞는 원생이 없어요.</div>';
   $('chk-info').textContent=S.checked.length+'명';
-  $('start-btn').disabled=S.checked.length===0;
+  $('start-btn').disabled=S.checked.length===0||!S.mode;
+  $('start-btn').textContent=S.mode?`${MODE_N[S.mode]} 심사 시작 ▶`:'심사 종류를 먼저 골라요';
   $('sort-entry').innerHTML=window.Android?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">📂 영상 분류</b><span style="color:var(--sub)">찍어둔 영상을 얼굴 보고 이름별 앨범으로 정리</span></div><button class="btn" style="width:auto;margin:0" onclick="go('sort')">열기</button></div>`:'';
   $('kakao-entry').innerHTML=window.Kakao?`<div class="box" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b style="margin:0">💬 찍은 영상 카톡 보내기</b><span style="color:var(--sub)">이름 누르고 영상 골라서 학부모님께 바로 전송</span></div><button class="btn kk" style="width:auto;margin:0" onclick="openKakao()">열기</button></div>`:'';
   const um=unshotList().length;
@@ -364,23 +391,103 @@ function addOne(){
 }
 function resetRoster(){ if(!confirm('명단을 엑셀 기준 처음 상태로 되돌릴까요?')) return; data=JSON.parse(JSON.stringify(ROSTER)); save(); renderCheck(); }
 
+/* ---------- 심사 종류 ---------- */
+const MODE_N={tkd:'태권도',jump:'줄넘기'};
+function renderMode(){ $('modebox').innerHTML=['tkd','jump'].map(m=>`<button class="${S.mode===m?'on':''}" onclick="setMode('${m}')">${MODE_N[m]} 심사<small>${m==='tkd'?'완료하면 합격 · 띠 올라감':'영상만 저장'}</small></button>`).join(''); }
+function setMode(m){ S.mode=m; save(); if(window.Android&&Android.setMode) Android.setMode(m); renderCheck(); }
+
+/* ---------- 노래 (골라 두면 계속 그 노래 · 바꿀 때까지) ---------- */
+function songsList(){ try{ return window.Android&&Android.songs?JSON.parse(Android.songs()):[]; }catch(e){ return []; } }
+function renderSongs(){
+  const b=$('songbox'); if(!b) return;
+  if(!(window.Android&&Android.songs)){ b.style.display='none'; return; }
+  const L=songsList(), sel=Android.songSel(); const cur=L.find(x=>x.id===sel);
+  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div class="sub" style="margin:0">${MODE_N[S.mode]||''} 심사 · 지금 노래</div><div class="nowsong">${cur?esc(cur.name):'노래 없이 찍기'}</div></div><button class="btn" style="width:auto;margin:0;padding:9px 12px" onclick="Android.addSongs()">+ 노래 추가</button></div>
+  <div class="songs"><button class="${!cur?'on':''}" onclick="pickSong('')">노래 없이</button>${L.map(x=>`<button class="${cur&&cur.id===x.id?'on':''}" onclick="pickSong('${x.id}')">${esc(x.name)}</button>`).join('')}</div>
+  <details style="margin-top:8px"><summary style="font-size:12.5px">노래 이름 바꾸기 · 빼기</summary>${L.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="text" value="${esc(x.name)}" data-sid="${x.id}" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="renameSong('${x.id}')">저장</button><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="delSong('${x.id}')">빼기</button></div>`).join('')}<div class="sub" style="margin-top:6px">예: '노랑띠 품새', '줄넘기 3급' 처럼 이름을 붙여 두면 고르기 쉬워요.</div></details>`;
+}
+function pickSong(id){ Android.selectSong(id); renderSongs(); const L=songsList(),c=L.find(x=>x.id===id); toast(c?`이제부터 '${c.name}' 노래로 찍어요`:'노래 없이 찍어요'); }
+function renameSong(id){ const el=document.querySelector(`[data-sid="${id}"]`); const v=(el&&el.value||'').trim(); if(!v) return; Android.renameSong(id,v); renderSongs(); toast('이름을 바꿨어요'); }
+function delSong(id){ if(!confirm('이 노래를 목록에서 뺄까요? (폰에 있는 원래 파일은 그대로예요)')) return; Android.delSong(id); renderSongs(); }
+window.onSongs=n=>{ renderSongs(); toast(n?`노래 ${n}곡을 넣었어요`:'노래를 넣지 못했어요'); };
+
+/* ---------- 태권도 합격 → 출결 앱 띠 올리기 ---------- */
+const BELTS=['흰띠','흰노띠','노랑띠','노초띠','초록띠','초파띠','파랑띠','보라띠','밤띠','밤빨띠','빨강띠','빨검띠'];
+const normBelt=raw=>{ const t=String(raw||'').trim().replace(/\s+/g,' '); if(!t) return ''; if(BELTS.includes(t)) return t; const m=t.match(/^(\d+)\s*품\s*(\d+)?\s*급?$/); if(m){ const p=+m[1]; const g=m[2]?+m[2]:p*12; return `${p}품 ${g}급`; } return t; };
+const KEEP=b=>b==='빨검띠'||/^\d+품/.test(b);   // 빨검띠 · 1품 · 2품 · 3품 → 국기원 심사라 그대로
+const AT={}; const AT_SDK='https://www.gstatic.com/firebasejs/10.12.2/';
+const atGet=(k,d)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } };
+const atSet=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+let PASS=atGet('jd2_pass_v1',{}), PROMO=atGet('jd2_promo_v1',[]);
+function atCfg(code){ code=String(code||'').trim(); if(!code.startsWith('JD1-')) return null; try{ const [projectId,apiKey,storageBucket]=atob(code.slice(4).replace(/-/g,'+').replace(/_/g,'/')).split('|'); return projectId&&apiKey?{projectId,apiKey,storageBucket,authDomain:projectId+'.firebaseapp.com'}:null; }catch(e){ return null; } }
+async function atReady(){
+  if(AT.db&&AT.user) return true;
+  const c=atGet('jd2_att',null); if(!c) return false; const cfg=atCfg(c.code); if(!cfg) return false;
+  const [{initializeApp,getApps},au,fs]=await Promise.all([import(AT_SDK+'firebase-app.js'),import(AT_SDK+'firebase-auth.js'),import(AT_SDK+'firebase-firestore.js')]);
+  const app=getApps().find(a=>a.name==='attend')||initializeApp(cfg,'attend');
+  let auth; try{ auth=au.initializeAuth(app,{persistence:au.inMemoryPersistence}); }catch(e){ auth=au.getAuth(app); }
+  AT.fs=fs; AT.db=fs.getFirestore(app);
+  const cr=await au.signInWithEmailAndPassword(auth,c.email,c.pw); AT.user=cr.user; return true;
+}
+async function atSave(){
+  const code=$('at-code').value.trim(), email=$('at-email').value.trim(), pw=$('at-pw').value;
+  if(!atCfg(code)){ $('at-msg').textContent='연결 코드를 확인해 주세요 (JD1- 로 시작)'; return; }
+  if(!email||!pw){ $('at-msg').textContent='이메일과 비밀번호를 넣어 주세요'; return; }
+  atSet('jd2_att',{code,email,pw}); AT.db=null; AT.user=null; $('at-msg').textContent='연결 중…';
+  try{ await atReady(); const n=(await AT.fs.getDocs(AT.fs.collection(AT.db,'students'))).size; $('at-msg').textContent=`연결됐어요 · 원생 ${n}명`; renderAtt(); runPromo(); }
+  catch(e){ $('at-msg').textContent='연결 실패: '+(e.code||e.message); }
+}
+function renderAtt(){ const c=atGet('jd2_att',null); $('attst').textContent=c?'· 연결됨':'· 안 됨'; if(c){ $('at-code').value=c.code; $('at-email').value=c.email; }
+  const left=PROMO.filter(p=>!p.ok); $('promo-left').innerHTML=left.length?`<div class="sub" style="margin-top:8px;color:#b45309">아직 띠를 못 올린 아이 ${left.length}명: ${left.map(p=>esc(p.n)+(p.why?' ('+esc(p.why)+')':'')).join(', ')} <button class="btn" style="width:auto;padding:6px 10px" onclick="runPromo(true)">다시 시도</button></div>`:''; }
+function todayK(){ const d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
+function passTkd(n){
+  if(PASS[n]&&PASS[n].day===todayK()){ toast(`${n}은(는) 오늘 이미 합격 처리했어요`); return; }
+  PASS[n]={day:todayK(),res:'합격 처리 중'}; atSet('jd2_pass_v1',PASS);
+  PROMO.push({n,at:Date.now(),ok:false}); atSet('jd2_promo_v1',PROMO); runPromo();
+}
+let promoBusy=false;
+async function runPromo(manual){
+  if(promoBusy) return; const todo=PROMO.filter(p=>!p.ok); if(!todo.length) return;
+  promoBusy=true;
+  try{
+    if(!await atReady()){ todo.forEach(p=>{p.why='출결 앱 연결 필요';PASS[p.n]={day:todayK(),res:'합격 · 출결 연결하면 띠 올라감',keep:1}}); if(manual) toast('먼저 출결 앱 연결을 해 주세요 (체크 화면 아래)'); return; }
+    const snap=await AT.fs.getDocs(AT.fs.collection(AT.db,'students')); const all=[]; snap.forEach(d=>all.push({id:d.id,...d.data()}));
+    for(const p of todo){
+      const nm=plainName(p.n); let c=all.filter(x=>String(x.name||'').trim()===nm&&x.status!=='LEFT');
+      if(!c.length){ p.why='출결 앱에 이름이 없어요'; continue; }
+      if(c.length>1){ const t=c.map((x,i)=>`${i+1}) ${x.name} · ${x.grade||''} · ${normBelt(x.belt)||'띠 없음'}`).join('\n'); const k=+prompt(`${p.n} 이름이 ${c.length}명이에요. 몇 번인가요?\n${t}`); if(!(k>=1&&k<=c.length)){ p.why='같은 이름이 여러 명'; continue; } c=[c[k-1]]; }
+      const s=c[0], cur=normBelt(s.belt);
+      if(!cur){ p.why='띠가 비어 있어요'; continue; }
+      if(KEEP(cur)){ p.ok=true; p.res=`${cur} 그대로 (국기원 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1}; continue; }
+      const i=BELTS.indexOf(cur); if(i<0){ p.why='띠 이름을 모르겠어요: '+cur; continue; }
+      const nx=BELTS[Math.min(BELTS.length-1,i+1)];
+      await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{belt:nx,beltManual:true,beltAt:Date.now(),lastPass:{kind:'태권도 영상심사',at:Date.now(),from:cur,to:nx}},{merge:true});
+      p.ok=true; p.res=`합격 ${cur} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res}; toast(`${p.n} 합격! ${cur} → ${nx}`);
+    }
+  }catch(e){ toast('띠 올리기 실패: '+(e.code||e.message)+' · 나중에 다시 시도해요'); }
+  finally{ PROMO=PROMO.filter(p=>!p.ok||Date.now()-p.at<864e5*3); atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); promoBusy=false; try{ renderAtt(); if(S.view==='shoot') renderShoot(); }catch(e){} }
+}
+
 function startShoot(){
   if(!S.checked.length) return;
+  if(!S.mode){ toast('먼저 맨 위에서 태권도 / 줄넘기를 골라 주세요'); return; }
+  if(window.Android&&Android.setMode) Android.setMode(S.mode);
   S.done=S.done.filter(n=>S.checked.includes(n));
   S.view='shoot'; save(); render(); window.scrollTo(0,0);
 }
 
 /* ---------- ② 촬영 ---------- */
 function renderShoot(){
+  renderSongs();
   const list=S.checked.filter(n=>allNames().includes(n));
   const pend=list.filter(n=>!S.done.includes(n)).sort(byRoster);
   const done=list.filter(n=>S.done.includes(n)).sort(byRoster);
   $('shoot-sub').innerHTML=window.Android
-    ?'이름을 누르면 카메라가 열려요. 촬영 후 ✓를 누르면 갤러리의 <b>정도태권도2관 › 이름</b> 앨범에 저장돼요.'
+    ?`<b>${MODE_N[S.mode]||''} 심사</b> · 이름을 누르면 촬영 화면이 열려요. 다 찍고 <b>[완료 · 저장]</b>을 눌러야 저장돼요${S.mode==='tkd'?' (저장 = 합격, 띠 한 단계 올라감)':''}. 중간에 취소하면 저장 안 돼요.`
     :'이름을 누르면 카메라가 열려요. 촬영 후 확인을 누르면 <b>이름_날짜시각.mp4</b>로 저장돼요.';
   $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
   $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
-  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
   let html='';
   if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
   else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';
@@ -481,7 +588,7 @@ $('cam').addEventListener('change',async e=>{
     markDone(cur);
   }catch(err){ toast('저장 실패: '+(err.message||err)); }
 });
-window.onNativeSaved=(n,rep)=>{ if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
+window.onNativeSaved=(n,rep)=>{ if(S.mode==='tkd') setTimeout(()=>passTkd(n),300); if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
 window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
 
 if(window.showDirectoryPicker && !window.Android){

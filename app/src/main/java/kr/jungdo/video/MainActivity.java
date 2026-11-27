@@ -37,6 +37,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
+import android.provider.OpenableColumns;
 
 import androidx.core.content.FileProvider;
 import androidx.media3.common.MediaItem;
@@ -92,6 +93,7 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK = 2;
     private static final int REQ_MEDIA = 3;
     private static final int REQ_FILE = 4;
+    private static final int REQ_SONG = 5;
     private android.webkit.ValueCallback<Uri[]> fileCb;
     private static final String KAKAO = "com.kakao.talk";
 
@@ -348,6 +350,37 @@ public class MainActivity extends Activity {
                     startRecord(name);
                 }
             });
+        }
+
+        /* 심사 종류 (tkd 태권도 · jump 줄넘기) */
+        @JavascriptInterface
+        public void setMode(String m) { cfg().edit().putString("mode", m).apply(); }
+
+        /* 노래 목록 (기본 노래 + 폰에서 고른 노래 여러 개) */
+        @JavascriptInterface
+        public String songs() { return songList().toString(); }
+        @JavascriptInterface
+        public String songSel() { return cfg().getString("songSel", ""); }
+        @JavascriptInterface
+        public void selectSong(String id) { cfg().edit().putString("songSel", id).apply(); }
+        @JavascriptInterface
+        public void addSongs() {
+            main.post(new Runnable() { @Override public void run() {
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("audio/*");
+                i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                try { startActivityForResult(i, REQ_SONG); } catch (Exception e) { toast("노래를 고를 수 없어요: " + e.getMessage()); }
+            } });
+        }
+        @JavascriptInterface
+        public void renameSong(String id, String name) {
+            try { JSONArray a = songList(); for (int k = 0; k < a.length(); k++) { JSONObject o = a.getJSONObject(k); if (id.equals(o.optString("id"))) o.put("name", name); } cfg().edit().putString("songs", a.toString()).apply(); } catch (Exception ignored) {}
+        }
+        @JavascriptInterface
+        public void delSong(String id) {
+            try { JSONArray a = songList(), b = new JSONArray(); for (int k = 0; k < a.length(); k++) { JSONObject o = a.getJSONObject(k); if (!id.equals(o.optString("id"))) b.put(o); } cfg().edit().putString("songs", b.toString()).apply();
+                if (id.equals(cfg().getString("songSel", ""))) cfg().edit().putString("songSel", "").apply(); } catch (Exception ignored) {}
         }
 
         @JavascriptInterface
@@ -832,7 +865,69 @@ public class MainActivity extends Activity {
 
     /* ====================== 촬영 ====================== */
 
+    private SharedPreferences cfg() { return getSharedPreferences("cfg", MODE_PRIVATE); }
+    private JSONArray songList() {
+        try {
+            String raw = cfg().getString("songs", null);
+            if (raw == null) {
+                JSONArray a = new JSONArray();
+                a.put(new JSONObject().put("id", "b1").put("name", "기본 노래 1").put("uri", "asset:songs/song01.mp3"));
+                cfg().edit().putString("songs", a.toString()).apply();
+                return a;
+            }
+            return new JSONArray(raw);
+        } catch (Exception e) { return new JSONArray(); }
+    }
+    private JSONObject selectedSong() {
+        String id = cfg().getString("songSel", "");
+        if (id.isEmpty()) return null;
+        try { JSONArray a = songList(); for (int k = 0; k < a.length(); k++) if (id.equals(a.getJSONObject(k).optString("id"))) return a.getJSONObject(k); } catch (Exception ignored) {}
+        return null;
+    }
+    private void onSongResult(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) return;
+        java.util.ArrayList<Uri> us = new java.util.ArrayList<>();
+        if (data.getClipData() != null) for (int k = 0; k < data.getClipData().getItemCount(); k++) us.add(data.getClipData().getItemAt(k).getUri());
+        else if (data.getData() != null) us.add(data.getData());
+        JSONArray a = songList(); int n = 0;
+        for (Uri u : us) {
+            try {
+                getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                String nm = "노래";
+                try (Cursor c = getContentResolver().query(u, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) { if (c != null && c.moveToFirst()) nm = c.getString(0); }
+                nm = nm.replaceAll("\\.[A-Za-z0-9]+$", "");
+                a.put(new JSONObject().put("id", "s" + System.currentTimeMillis() + "_" + n).put("name", nm).put("uri", u.toString()));
+                n++;
+            } catch (Exception ignored) {}
+        }
+        cfg().edit().putString("songs", a.toString()).apply();
+        web.evaluateJavascript("window.onSongs&&window.onSongs(" + n + ")", null);
+    }
+
     private void startRecord(String name) {
+        // 앱 안 촬영 화면 (노래 같이 틀기 · 완료를 눌러야 저장)
+        try {
+            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date());
+            File dir = new File(getCacheDir(), "videos");
+            if (!dir.exists()) dir.mkdirs();
+            File f = new File(dir, "tmp_" + stamp + ".mp4");
+            Intent i = new Intent(this, RecordActivity.class);
+            i.putExtra(RecordActivity.EX_PATH, f.getAbsolutePath());
+            i.putExtra(RecordActivity.EX_NAME, name);
+            i.putExtra(RecordActivity.EX_MODE, cfg().getString("mode", "tkd"));
+            JSONObject sg = selectedSong();
+            if (sg != null) { i.putExtra(RecordActivity.EX_SONG, sg.optString("uri")); i.putExtra(RecordActivity.EX_SONGNAME, sg.optString("name")); }
+            prefs.edit().putString("path", f.getAbsolutePath()).putString("name", name)
+                    .putLong("at", System.currentTimeMillis()).apply();
+            startActivityForResult(i, REQ_VIDEO);
+            return;
+        } catch (Exception e) {
+            toast("앱 촬영 화면을 못 열어서 기본 카메라로 찍어요");
+        }
+        startSystemRecord(name);
+    }
+
+    private void startSystemRecord(String name) {
         try {
             String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(new Date());
             File dir = new File(getCacheDir(), "videos");
@@ -864,6 +959,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_VIDEO) onVideoResult(resultCode, data);
         else if (requestCode == REQ_PICK) onPickResult(resultCode, data);
+        else if (requestCode == REQ_SONG) onSongResult(resultCode, data);
         else if (requestCode == REQ_FILE && fileCb != null) {
             Uri u = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
             fileCb.onReceiveValue(u != null ? new Uri[]{u} : null);

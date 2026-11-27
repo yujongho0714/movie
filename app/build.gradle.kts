@@ -12,7 +12,7 @@ android {
         targetSdk = 34
         // 깃허브 빌드 번호(= Releases 의 vN) 를 버전 번호로 → 앱이 새 버전인지 비교할 수 있게
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "7").toInt()
-        versionName = "1.5"
+        versionName = "1.6"
     }
 
     // 매번 같은 서명으로 만들어서 새 버전이 기존 앱 위에 바로 업데이트되게 함
@@ -42,5 +42,13 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    // 앱 안 촬영 화면 (노래 틀면서 찍기)
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-video:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("androidx.activity:activity:1.8.2")
+    implementation("com.google.guava:listenablefuture:1.0")
     implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
 }
