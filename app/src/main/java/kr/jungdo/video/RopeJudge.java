@@ -39,6 +39,7 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean on = false;
+    private long t0 = 0;
 
     public RopeJudge(int n, Boxes boxes, Listener l) {
         this.n = Math.max(1, n); this.boxes = boxes; this.listener = l;
@@ -49,13 +50,16 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
         }
     }
 
-    public void start() { synchronized (tr) { for (int i = 0; i < n; i++) tr[i] = new Track(); } on = true; post(); }
+    public void start() { synchronized (tr) { for (int i = 0; i < n; i++) tr[i] = new Track(); } t0 = SystemClock.uptimeMillis(); on = true; post(); }
     public void stop() { on = false; synchronized (tr) { for (Track t : tr) t.finish(); } post(); }
     public void close() { on = false; for (PoseDetector d : det) try { d.close(); } catch (Exception ignored) {} }
 
     public String json() {
         JSONArray a = new JSONArray();
-        synchronized (tr) { for (Track t : tr) { JSONArray o = new JSONArray(); o.put(t.miss); o.put(t.jumps); a.put(o); } }
+        // [걸림, 뛴 횟수, [걸린 때(ms)], [뛴 때(ms)]] — 영상에 숫자를 시간에 맞춰 넣을 때 써요
+        synchronized (tr) { for (Track t : tr) { JSONArray o = new JSONArray(); o.put(t.miss); o.put(t.jumps);
+            JSONArray mt = new JSONArray(); for (long x : t.missT) mt.put(x - t0); JSONArray jt = new JSONArray(); for (long x : t.jumpT) jt.put(x - t0);
+            o.put(mt); o.put(jt); a.put(o); } }
         return a.toString();
     }
 
@@ -105,6 +109,7 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
         boolean up = false, active = false, missed = false;
         float ext = Float.NaN, scale = 0;
         long lastJump = 0, firstRun = 0;
+        final java.util.ArrayList<Long> missT = new java.util.ArrayList<>(), jumpT = new java.util.ArrayList<>();
         static final float THR = 0.03f;       // 몸 길이의 3% 넘게 오르내리면 한 번 뜀
         static final long STOP_MS = 900;      // 뛰다가 이만큼 멈추면 걸림
 
@@ -116,17 +121,17 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
                 else if (!up) { if (v > ext) ext = v; else if (ext - v > THR) { up = true; ext = v; } }      // 화면 위쪽 = y 작음
                 else { if (v < ext) ext = v; else if (v - ext > THR) { up = false; ext = v; jump(t); } }
             }
-            if (active && t - lastJump > STOP_MS) { miss++; since = 0; missed = true; active = false; }
+            if (active && t - lastJump > STOP_MS) { miss++; since = 0; missed = true; active = false; missT.add(lastJump + 300); }
         }
         void jump(long t) {
-            jumps++; since++;
+            jumps++; since++; jumpT.add(t);
             // 1.2초 안에 이어서 뛰면 "뛰는 중"
             if (!active) { if (lastJump > 0 && t - lastJump < 1200) active = true; }
             lastJump = t;
         }
         void finish() {
             // 마지막 걸림 뒤로 한 번도 안 뛰었으면 그건 심사가 끝나서 멈춘 것
-            if (missed && since == 0 && miss > 0) miss--;
+            if (missed && since == 0 && miss > 0) { miss--; if (!missT.isEmpty()) missT.remove(missT.size() - 1); }
             active = false;
         }
     }

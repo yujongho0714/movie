@@ -127,6 +127,7 @@ public class MainActivity extends Activity {
         float[] crop;   // 여러 명 같이 찍기: 이 아이 칸 (0~1, 왼쪽·위·오른쪽·아래)
         String song;    // 원래 소리를 끄면 이 노래만 들어가요
         int miss = -1, jumps = 0;   // 줄넘기 실시간 판정 (걸린 횟수 · 뛴 횟수)
+        long[] missT, jumpT;        // 언제 걸렸는지 · 언제 뛰었는지 (영상 시작부터 ms) → 영상에 숫자로 넣어요
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
     private boolean working = false;
@@ -1055,6 +1056,41 @@ public class MainActivity extends Activity {
         } catch (Exception e) { toast("가져오기 실패: " + e.getMessage()); }
     }
 
+    private static void setJudge(Job j, JSONArray o) {
+        try {
+            j.miss = o.getInt(0); j.jumps = o.getInt(1);
+            JSONArray mt = o.optJSONArray(2), jt = o.optJSONArray(3);
+            if (mt != null && jt != null) { j.missT = new long[mt.length()]; for (int i = 0; i < mt.length(); i++) j.missT[i] = mt.getLong(i);
+                j.jumpT = new long[jt.length()]; for (int i = 0; i < jt.length(); i++) j.jumpT[i] = jt.getLong(i); }
+        } catch (Exception ignored) {}
+    }
+
+    /** 줄넘기 판정 숫자: 영상 시간에 맞춰 "걸림 N · M개", 걸린 순간엔 1초 동안 빨갛게 */
+    private class JudgeOverlay extends BitmapOverlay {
+        final long[] mt, jt; final int frameH; String key = ""; Bitmap bmp;
+        JudgeOverlay(long[] mt, long[] jt, int frameH) { this.mt = mt; this.jt = jt; this.frameH = frameH; }
+        @Override public Bitmap getBitmap(long presentationTimeUs) {
+            long ms = presentationTimeUs / 1000; int m = 0, jn = 0; boolean flash = false;
+            for (long x : mt) if (x <= ms) { m++; if (ms - x < 1000) flash = true; }
+            for (long x : jt) if (x <= ms) jn++;
+            String k = m + "|" + jn + "|" + flash;
+            if (!k.equals(key) || bmp == null) { key = k; bmp = judgeBitmap((flash ? "걸림! " : "걸림 ") + m + "번  ·  " + jn + "개", frameH, flash); }
+            return bmp;
+        }
+    }
+    private Bitmap judgeBitmap(String text, int frameH, boolean red) {
+        float size = Math.max(22f, frameH * 0.045f);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG); p.setTextSize(size); p.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        Rect b = new Rect(); p.getTextBounds(text, 0, text.length(), b);
+        int pad = (int) (size * 0.4f), bw = b.width() + pad * 2, bh = (int) (size * 1.4f) + pad;
+        Bitmap bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG); bg.setColor(red ? Color.argb(220, 226, 72, 80) : Color.argb(150, 11, 16, 32));
+        c.drawRoundRect(new RectF(0, 0, bw, bh), pad, pad, bg);
+        p.setColor(Color.WHITE); c.drawText(text, pad - b.left, bh / 2f - (p.descent() + p.ascent()) / 2f, p);
+        return bmp;
+    }
+
     private void onVideoResult(int resultCode, Intent data) {
         String path = prefs.getString("path", null);
         final String name = prefs.getString("name", "");
@@ -1071,7 +1107,7 @@ public class MainActivity extends Activity {
         j.replace = replace;
         if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; }
         JSONArray missA = null;
-        try { String ms = data != null ? data.getStringExtra(RecordActivity.EX_MISS) : null; if (ms != null) { missA = new JSONArray(ms); if (missA.length() > 0) { j.miss = missA.getJSONArray(0).getInt(0); j.jumps = missA.getJSONArray(0).getInt(1); } } } catch (Exception ignored) {}
+        try { String ms = data != null ? data.getStringExtra(RecordActivity.EX_MISS) : null; if (ms != null) { missA = new JSONArray(ms); if (missA.length() > 0) setJudge(j, missA.getJSONArray(0));  } } catch (Exception ignored) {}
         if (resultCode != RESULT_OK) {
             // 촬영 도중 멈추거나 뒤로 가기/취소 → 저장하지 않음
             f.delete();
@@ -1101,7 +1137,7 @@ public class MainActivity extends Activity {
                     for (int k = 0; k < n; k++) {
                         JSONArray q = rs.getJSONArray(k);
                         Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song;
-                        if (missA != null && k < missA.length()) { g.miss = missA.getJSONArray(k).getInt(0); g.jumps = missA.getJSONArray(k).getInt(1); }
+                        if (missA != null && k < missA.length()) setJudge(g, missA.getJSONArray(k));
                         g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                         g.temp = k == n - 1 ? j.temp : null;
                         jobs.add(g);
@@ -1205,6 +1241,11 @@ public class MainActivity extends Activity {
                 .setOverlayFrameAnchor(1f, 1f)
                 .build();
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
+        if (j.missT != null && j.jumpT != null) {
+            OverlaySettings js = new OverlaySettings.Builder().setBackgroundFrameAnchor(-0.94f, 0.95f).setOverlayFrameAnchor(-1f, 1f).build();
+            JudgeOverlay jo = new JudgeOverlay(j.missT, j.jumpT, dispH) { @Override public OverlaySettings getOverlaySettings(long t) { return js; } };
+            overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os), jo);
+        }
         fx.add(new OverlayEffect(overlays));
         final boolean mute = cfg().getBoolean("mute", true);
         EditedMediaItem item = new EditedMediaItem.Builder(MediaItem.fromUri(j.src))
