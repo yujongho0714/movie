@@ -389,6 +389,23 @@ public class MainActivity extends Activity {
 
         /* 예전에 찍은 영상 노래 다시 맞추기 (합격 처리 · 날짜 표시는 다시 안 해요) */
         @JavascriptInterface
+        public void setTrim(String uri, int startMs, int endMs) { cfg().edit().putString("trim|" + uri, Math.max(0, startMs) + "," + Math.max(0, endMs)).apply(); }
+        @JavascriptInterface
+        public String getTrim(String uri) { long[] t = trimOf(uri); return (t[0] / 1000.0) + "," + (t[1] / 1000.0); }
+        /* 여러 명 · 가져오기: 오늘 이미 찍은 아이는 전 영상을 지우고 바꿀지 */
+        @JavascriptInterface
+        public void recordGroup2(final String namesJson, final boolean replace) {
+            main.post(new Runnable() { @Override public void run() {
+                prefs.edit().putBoolean("replace", false).putBoolean("grpRep", replace).putString("names", namesJson).apply();
+                startRecord("여러 명");
+            } });
+        }
+        @JavascriptInterface
+        public void importExam2(final String namesJson, final boolean replace) {
+            cfg().edit().putBoolean("impRep", replace).apply();
+            importExam(namesJson);
+        }
+        @JavascriptInterface
         public int oldOfs() { return (int) (cfg().getLong("oldOfs", -1)); }
         @JavascriptInterface
         public void resync() {
@@ -1056,6 +1073,10 @@ public class MainActivity extends Activity {
         toast("노래 다시 맞추는 중... " + rsTotal + "개");
         resyncNext();
     }
+    /** 노래별 앞 · 뒤 자르기 (ms): [앞에서 자를 시간, 노래 몇 ms에서 끝 (0 = 끝까지)] */
+    private long[] trimOf(String uri) {
+        try { String[] v = cfg().getString("trim|" + uri, "0,0").split(","); return new long[]{Long.parseLong(v[0]), Long.parseLong(v[1])}; } catch (Exception e) { return new long[]{0, 0}; }
+    }
     private long oldOfsMs() { long o = cfg().getLong("oldOfs", -1); if (o < 0) o = 450; return Math.max(0, o + cfg().getLong("syncMs", 0)); }
     private void resyncNext() {
         final Uri u = rsq.poll();
@@ -1064,10 +1085,14 @@ public class MainActivity extends Activity {
             try {
                 JSONObject sg = selectedSong();
                 String su = sg.optString("uri"); if (su.startsWith("asset:")) su = "asset:///" + su.substring(6);
-                long clip = oldOfsMs();
-                MediaItem vmi = new MediaItem.Builder().setUri(u).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(clip).build()).build();
+                long[] tr = trimOf(sg.optString("uri"));
+                long clip = oldOfsMs() + tr[0];
+                MediaItem.ClippingConfiguration.Builder cb = new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(clip);
+                if (tr[1] > tr[0]) cb.setEndPositionMs(clip - tr[0] + tr[1]);
+                MediaItem vmi = new MediaItem.Builder().setUri(u).setClippingConfiguration(cb.build()).build();
                 EditedMediaItem item = new EditedMediaItem.Builder(vmi).setRemoveAudio(true).build();
-                EditedMediaItem song = new EditedMediaItem.Builder(MediaItem.fromUri(su)).setRemoveVideo(true).build();
+                MediaItem smi = tr[0] > 0 ? new MediaItem.Builder().setUri(su).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(tr[0]).build()).build() : MediaItem.fromUri(su);
+                EditedMediaItem song = new EditedMediaItem.Builder(smi).setRemoveVideo(true).build();
                 Composition comp = new Composition.Builder(new EditedMediaItemSequence(item), new EditedMediaItemSequence(ImmutableList.of(song), true)).build();
                 File dir = new File(getCacheDir(), "videos"); if (!dir.exists()) dir.mkdirs();
                 final File out = new File(dir, "resync_" + System.nanoTime() + ".mp4");
@@ -1136,7 +1161,7 @@ public class MainActivity extends Activity {
             int n = Math.min(ns.length(), rs.length());
             for (int k = 0; k < n; k++) {
                 JSONArray q = rs.getJSONArray(k);
-                Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.src = src; g.song = sg != null ? sg.optString("uri") : null;
+                Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.src = src; g.song = sg != null ? sg.optString("uri") : null; g.replace = cfg().getBoolean("impRep", false);
                 g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                 if (n == 1 && g.crop[0] <= 0.005f && g.crop[1] <= 0.005f && g.crop[2] >= 0.995f && g.crop[3] >= 0.995f) g.crop = null;
                 jobs.add(g);
@@ -1185,7 +1210,7 @@ public class MainActivity extends Activity {
         String path = prefs.getString("path", null);
         final String name = prefs.getString("name", "");
         long at = prefs.getLong("at", System.currentTimeMillis());
-        boolean replace = prefs.getBoolean("replace", false);
+        boolean replace = prefs.getBoolean("replace", false), grpRep = prefs.getBoolean("grpRep", false);
         String namesJson = prefs.getString("names", null);
         prefs.edit().clear().apply();
         if (path == null) return;
@@ -1226,7 +1251,7 @@ public class MainActivity extends Activity {
                 if (n > 1) {
                     for (int k = 0; k < n; k++) {
                         JSONArray q = rs.getJSONArray(k);
-                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song; g.songOfs = j.songOfs;
+                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = grpRep; g.src = j.src; g.song = j.song; g.songOfs = j.songOfs;
                         if (missA != null && k < missA.length()) setJudge(g, missA.getJSONArray(k));
                         g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                         g.temp = k == n - 1 ? j.temp : null;
@@ -1331,11 +1356,17 @@ public class MainActivity extends Activity {
                 .setOverlayFrameAnchor(1f, 1f)
                 .build();
         final boolean mute = cfg().getBoolean("mute", true);
-        final boolean withSong = mute && j.song != null && !j.song.isEmpty();
-        // 노래 맞추기: 자동으로 잰 시간 + 원장님이 정한 보정(설정) · +면 영상 앞을 자르고, -면 노래 앞을 잘라요
-        long ofs = withSong ? j.songOfs + cfg().getLong("syncMs", 0) : 0;
-        final long vClip = Math.max(0, ofs), sClip = Math.max(0, -ofs);
-        MediaItem vmi = vClip > 0 ? new MediaItem.Builder().setUri(j.src).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(vClip).build()).build() : MediaItem.fromUri(j.src);
+        final boolean hasSong = j.song != null && !j.song.isEmpty();
+        final boolean withSong = mute && hasSong;
+        // 노래 맞추기: 자동으로 잰 시간 + 원장님이 정한 보정(설정) · 노래 0초 = 영상 ofs ms
+        long ofs = withSong ? j.songOfs + cfg().getLong("syncMs", 0) : hasSong ? j.songOfs : 0;
+        // 노래마다 앞 · 뒤 자르기 (전주 빼기): 노래 tr[0]초 ~ tr[1]초만 남겨요 → 같은 노래로 찍은 아이는 모두 똑같이
+        long[] tr = hasSong ? trimOf(j.song) : new long[]{0, 0};
+        final long vClip = Math.max(0, ofs + tr[0]), sClip = Math.max(0, vClip - ofs);
+        final boolean cutEnd = tr[1] > tr[0];
+        MediaItem.ClippingConfiguration.Builder cb = new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(vClip);
+        if (cutEnd) cb.setEndPositionMs(Math.max(vClip + 1000, ofs + tr[1]));
+        MediaItem vmi = (vClip > 0 || cutEnd) ? new MediaItem.Builder().setUri(j.src).setClippingConfiguration(cb.build()).build() : MediaItem.fromUri(j.src);
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
         if (j.missT != null && j.jumpT != null) {
             OverlaySettings js = new OverlaySettings.Builder().setBackgroundFrameAnchor(-0.94f, 0.95f).setOverlayFrameAnchor(-1f, 1f).build();

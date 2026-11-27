@@ -49,6 +49,7 @@ input[type=search],input[type=text],select{width:100%;background:var(--soft);bor
 .gn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:#fff;font-weight:900;font-size:13px}.gn.off{background:transparent;border:2px solid var(--line)}.row.gon{border-color:var(--accent)}
 .mute{border:0!important;padding:0!important;background:none!important;display:flex!important;gap:8px;align-items:flex-start;margin:10px 0 2px;font-size:13px;font-weight:600;line-height:1.45}.mute span{flex:1}.mute b{display:inline!important;margin:0!important;font-size:inherit!important}.mute input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent)}
 .sync{display:flex;align-items:center;gap:6px;margin:8px 0 2px;font-size:12.5px;font-weight:600}.sync span{flex:1}.sync small{color:var(--sub);font-weight:500}.sync button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:8px;padding:6px 8px;font-weight:800;font-size:12px}.sync b{min-width:44px;text-align:center}
+.btn.gogrp{background:#16a34a;color:#fff;border-color:#16a34a;font-size:16px;font-weight:900;width:100%;margin:0;padding:13px}
 .tag{font-size:11px;font-weight:700;color:var(--danger);border:1px solid var(--danger);border-radius:999px;padding:2px 7px}
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:26px 10px}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;font-size:13px;line-height:1.5}
@@ -263,7 +264,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
   <button class="btn" onclick="clearChecks()" style="flex:none;width:auto;padding:11px 14px">해제</button>
   <button class="btn primary" id="start-btn" onclick="startShoot()">심사 시작 ▶</button>
 </div></div>
-<div class="bar" id="bar-shoot"><div class="in">
+<div class="bar" id="bar-shoot"><div id="grpgo" style="display:none;max-width:720px;margin:0 auto 8px"></div><div class="in">
   <button class="btn" onclick="backToCheck()" style="flex:none;width:auto;padding:11px 14px">← 체크 수정</button>
   <button class="btn primary" onclick="nextSlot()">다음 타임 준비 ▶</button>
 </div></div>
@@ -412,13 +413,19 @@ function renderSongs(){
   const L=songsList(), sel=Android.songSel(); const cur=L.find(x=>x.id===sel);
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div class="sub" style="margin:0">${MODE_N[S.mode]||''} 심사 · 지금 노래</div><div class="nowsong">${cur?esc(cur.name):'노래 없이 찍기'}</div></div><button class="btn" style="width:auto;margin:0;padding:9px 12px" onclick="Android.addSongs()">+ 노래 추가</button></div>
   <label class="mute"><input type="checkbox" id="muteChk" ${Android.getMute&&Android.getMute()?'checked':''} onchange="setOrigMute(this.checked)"><span>원래 소리(목소리 · 주변 소리) 끄고 <b>고른 노래만</b> 넣어서 저장</span></label>
+  ${cur&&Android.setTrim?`<div class="sync"><span>이 노래 앞 · 뒤 자르기 <small>(전주 빼기 · 이 노래로 찍는 아이 모두 똑같이)</small></span></div>
+  <div class="sync"><span>앞에서 <input type="number" min="0" step="0.5" inputmode="decimal" id="trS" value="${trimOf(cur.uri)[0]||''}" placeholder="0" style="width:64px;margin:0 4px;padding:6px"> 초 자르고</span><span>노래 <input type="number" min="0" step="0.5" inputmode="decimal" id="trE" value="${trimOf(cur.uri)[1]||''}" placeholder="끝까지" style="width:72px;margin:0 4px;padding:6px"> 초에서 끝</span><button onclick="saveTrim('${encodeURIComponent(cur.uri)}')">저장</button></div>`:''}
   ${Android.setSync?`<div class="sync"><span>저장 영상의 노래 맞추기 <small>(노래가 빠르면 +, 느리면 −)</small></span><button onclick="syncAdj(-100)">−0.1초</button><b id="syncV">${((Android.getSync()|0)/1000).toFixed(1)}초</b><button onclick="syncAdj(100)">+0.1초</button></div>`:''}
   ${Android.resync?`<details style="margin-top:8px"><summary style="font-size:12.5px">예전에 찍은 영상 노래 다시 맞추기</summary><div class="sub" style="margin:6px 0">11월 27일 오후 3시 전 버전으로 찍은 영상은 노래가 조금 빨라요. 영상을 고르면 노래를 <b>${Android.oldOfs()>=0?(Android.oldOfs()/1000).toFixed(2)+'초 (이 폰에서 잰 값)':'약 0.45초 (한 번 찍으면 이 폰에 맞게 다시 재요)'}</b>${(Android.getSync()|0)?' '+((Android.getSync()|0)>0?'+':'')+((Android.getSync()|0)/1000).toFixed(1)+'초 보정':''} 늦춰서 그 자리에 다시 저장해요. <b>그때 쓴 노래가 지금 골라져 있어야 해요.</b> 합격 처리 · 날짜 표시는 다시 안 해요.</div><button class="btn" onclick="Android.resync()">영상 고르기 (여러 개 가능)</button></details>`:''}
-  ${S.mode==='jump'&&Android.setJudge?`<label class="mute"><input type="checkbox" ${Android.getJudge&&Android.getJudge()?'checked':''} onchange="setJudge(this.checked)"><span><b>실시간 판정</b> · 찍는 동안 걸린 횟수와 뛴 횟수를 세요 (발이 멈추면 걸림 · 참고용)</span></label>`:''}
+  ${S.mode==='jump'&&Android.setJudge?`<label class="mute"><input type="checkbox" ${Android.getJudge&&Android.getJudge()?'checked':''} onchange="setJudge(this.checked)"><span><b>실시간 판정</b> · 찍는 동안 걸린 횟수와 뛴 횟수를 세요 (시험 중 · 정확하지 않을 수 있어요)</span></label>`:''}
   <div class="songs"><button class="${!cur?'on':''}" onclick="pickSong('')">노래 없이</button>${L.map(x=>`<button class="${cur&&cur.id===x.id?'on':''}" onclick="pickSong('${x.id}')">${esc(x.name)}</button>`).join('')}</div>
   <details style="margin-top:8px"><summary style="font-size:12.5px">노래 이름 바꾸기 · 빼기</summary>${L.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="text" value="${esc(x.name)}" data-sid="${x.id}" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="renameSong('${x.id}')">저장</button><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="delSong('${x.id}')">빼기</button></div>`).join('')}<div class="sub" style="margin-top:6px">예: '노랑띠 품새', '줄넘기 3급' 처럼 이름을 붙여 두면 고르기 쉬워요.</div></details>`;
 }
 window.onResyncDone=(ok,t)=>toast(`노래 다시 맞추기 ${ok} / ${t}개 끝`);
+function trimOf(u){ try{ const v=(Android.getTrim(u)||'').split(','); return [+v[0]||0,+v[1]||0]; }catch(e){ return [0,0]; } }
+function saveTrim(ue){ const u=decodeURIComponent(ue); const a=Math.max(0,+($('trS').value||0)), b=Math.max(0,+($('trE').value||0));
+  if(b&&b<=a+1){ toast('끝 시간은 앞 자르기보다 커야 해요'); return; }
+  Android.setTrim(u,Math.round(a*1000),Math.round(b*1000)); toast(a||b?`이 노래로 찍으면 ${a?a+'초 앞을 자르고 ':''}${b?'노래 '+b+'초에서 끝내요':'끝까지 써요'} (다음 저장부터)`:'자르지 않아요'); }
 function syncAdj(d){ const v=Math.max(-3000,Math.min(3000,(Android.getSync()|0)+d)); Android.setSync(v); const el=$('syncV'); if(el) el.textContent=(v/1000).toFixed(1)+'초'; toast(v===0?'자동으로 맞춰요':'노래를 '+Math.abs(v/1000).toFixed(1)+'초 '+(v>0?'늦게':'일찍')+' 넣어요 (다음 저장부터)'); }
 function setJudge(v){ if(Android.setJudge) Android.setJudge(!!v); toast(v?'찍는 동안 걸린 횟수를 세요':'실시간 판정을 껐어요'); }
 let JUDGE={}; try{ JUDGE=JSON.parse(localStorage.getItem('jd2_judge_v1')||'{}') }catch(e){}
@@ -485,8 +492,10 @@ function renderAtt(){ const c=atGet('jd2_att',null); if(!rosterUnsub) $('attst')
   renderPend();
   const left=PROMO.filter(p=>!p.ok&&!p.need); $('promo-left').innerHTML=left.length?`<div class="sub" style="margin-top:8px;color:#b45309">아직 띠를 못 올린 아이 ${left.length}명: ${left.map(p=>esc(p.n)+(p.why?' ('+esc(p.why)+')':'')).join(', ')} <button class="btn" style="width:auto;padding:6px 10px" onclick="runPromo(true)">다시 시도</button></div>`:''; }
 function todayK(){ const d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
+const monOf=d=>String(d||'').split('-').slice(0,2).join('-');
 function passTkd(n,mode){ mode=mode||'tkd';
-  if(PASS[n]&&PASS[n].day===todayK()&&PASS[n].mode===mode){ toast(`${n}은(는) 오늘 이미 합격 처리했어요`); return; }
+  // 같은 달에 여러 번 찍어도 승급은 한 번만 (영상은 따로 남아요)
+  if(PASS[n]&&PASS[n].mode===mode&&monOf(PASS[n].day)===monOf(todayK())){ toast(`${n}은(는) 이번 달 이미 ${mode==='jump'?'줄넘기':'태권도'} 승급 처리했어요 (한 달에 한 번)`); return; }
   PASS[n]={day:todayK(),res:'합격 처리 중',mode}; atSet('jd2_pass_v1',PASS);
   PROMO.push({n,mode,sid:SID[n]||'',at:Date.now(),ok:false}); atSet('jd2_promo_v1',PROMO); runPromo();
 }
@@ -507,7 +516,8 @@ async function setPend(i){
     let nx=v,keep=false;
     if(p.need==='jump'){ const k=JUMPS.indexOf(v); if(v==='1급'){keep=true}else nx=JUMPS[k+1]; }
     else{ if(KEEP(v)){keep=true}else{ const k=BELTS.indexOf(v); nx=BELTS[Math.min(BELTS.length-1,k+1)]; } }
-    await AT.fs.setDoc(AT.fs.doc(AT.db,'students',p.sid),p.need==='jump'?{jumpGrade:nx,jumpAt:Date.now(),lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:v,to:nx}}:{belt:nx,beltManual:true,beltAt:Date.now(),lastPass:{kind:'태권도 영상심사',at:Date.now(),from:v,to:nx}},{merge:true});
+    const mk2=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+    await AT.fs.setDoc(AT.fs.doc(AT.db,'students',p.sid),p.need==='jump'?{jumpGrade:nx,jumpAt:Date.now(),vidPass:{jump:mk2},lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:v,to:nx}}:{belt:nx,beltManual:true,beltAt:Date.now(),vidPass:{tkd:mk2},lastPass:{kind:'태권도 영상심사',at:Date.now(),from:v,to:nx}},{merge:true});
     p.ok=true; p.res=(p.need==='jump'?'줄넘기 ':'')+(keep?v+' 그대로 ('+(p.need==='jump'?'주니어':'국기원')+' 심사)':'합격 '+v+' → '+nx); PASS[p.n]={day:todayK(),res:p.res,mode:p.mode}; delete p.need;
     atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); toast(`${p.n} ${p.res}`); renderAtt(); if(S.view==='shoot') renderShoot();
   }catch(e){ toast('저장 실패: '+(e.code||e.message)); }
@@ -524,13 +534,17 @@ async function runPromo(manual){
       if(!c.length){ p.why='출결 앱에 이름이 없어요'; continue; }
       if(c.length>1){ const t=c.map((x,i)=>`${i+1}) ${x.name} · ${x.grade||''} · ${normBelt(x.belt)||'띠 없음'}`).join('\n'); const k=+prompt(`${p.n} 이름이 ${c.length}명이에요. 몇 번인가요?\n${t}`); if(!(k>=1&&k<=c.length)){ p.why='같은 이름이 여러 명'; continue; } c=[c[k-1]]; }
       const s=c[0];
+      // 출결 앱 기록으로도 확인: 이번 달 이미 영상심사로 올라갔으면 그대로 (다른 폰에서 찍었어도)
+      const mk=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+      const vp=(s.vidPass||{})[p.mode], lp=s.lastPass||{}, lpm=lp.at?new Date(lp.at).getFullYear()+'-'+String(new Date(lp.at).getMonth()+1).padStart(2,'0'):'';
+      if(vp===mk||(lpm===mk&&lp.kind===(p.mode==='jump'?'줄넘기 영상심사':'태권도 영상심사'))){ p.ok=true; p.res=(p.mode==='jump'?'줄넘기 ':'')+'이번 달 이미 승급 (한 달에 한 번)'; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:p.mode}; continue; }
       if(p.mode==='jump'){
         const cur=String(s.jumpGrade||'').trim();
         if(cur==='1급'||/주니어/.test(cur)){ p.ok=true; p.res=`줄넘기 ${cur} 그대로 (주니어 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'jump'}; continue; }
         if(!cur){ p.why='줄넘기 급 미지정'; p.need='jump'; p.sid=s.id; PASS[p.n]={day:todayK(),res:'합격 · 급 미지정 (숫자 넣어 주세요)',keep:1,mode:'jump'}; continue; }
         const i=JUMPS.indexOf(cur); if(i<0){ p.why='급 이름을 모르겠어요: '+cur; continue; }
         const nx=JUMPS[i+1];
-        await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{jumpGrade:nx,jumpAt:Date.now(),lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:cur||'없음',to:nx}},{merge:true});
+        await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{jumpGrade:nx,jumpAt:Date.now(),vidPass:{jump:mk},lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:cur||'없음',to:nx}},{merge:true});
         p.ok=true; p.res=`줄넘기 합격 ${cur||'처음'} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'jump'}; toast(`${p.n} ${p.res}`); continue;
       }
       const cur=normBelt(s.belt);
@@ -538,7 +552,7 @@ async function runPromo(manual){
       if(KEEP(cur)){ p.ok=true; p.res=`${cur} 그대로 (국기원 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'tkd'}; continue; }
       const i=BELTS.indexOf(cur); if(i<0){ p.why='띠 이름을 모르겠어요: '+cur; continue; }
       const nx=BELTS[Math.min(BELTS.length-1,i+1)];
-      await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{belt:nx,beltManual:true,beltAt:Date.now(),lastPass:{kind:'태권도 영상심사',at:Date.now(),from:cur,to:nx}},{merge:true});
+      await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{belt:nx,beltManual:true,beltAt:Date.now(),vidPass:{tkd:mk},lastPass:{kind:'태권도 영상심사',at:Date.now(),from:cur,to:nx}},{merge:true});
       p.ok=true; p.res=`합격 ${cur} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'tkd'}; toast(`${p.n} 합격! ${cur} → ${nx}`);
     }
   }catch(e){ toast('띠 올리기 실패: '+(e.code||e.message)+' · 나중에 다시 시도해요'); }
@@ -584,17 +598,25 @@ function renderGrp(){ const el=$('grpbar'); if(!el) return;
       <div class="sub" style="margin:6px 0 0">촬영 화면에 아이마다 칸이 생기고 칸 위에 이름이 떠요. 칸은 끌어서 옮기고 모서리 점으로 크기를 바꿔요. [완료 · 저장]을 누르면 칸마다 따로 잘라서 아이 이름으로 저장돼요.</div>
       <div style="display:flex;gap:6px;margin-top:8px"><input type="text" id="gadd" list="gnames" placeholder="이름 입력해서 추가" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 12px" onclick="gAdd()">추가</button></div>
       <datalist id="gnames">${allNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
-      <button class="btn primary" ${GSEL.length<2?'disabled':''} onclick="goGrp()">${GSEL.length<2?'같이 촬영은 2명 이상 골라 주세요':GSEL.length+'명 같이 촬영 ›'}</button>
+      <div class="sub" style="margin:8px 0 0">${GSEL.length<2?'같이 촬영은 2명 이상 골라 주세요':'맨 아래 <b style="color:#16a34a;display:inline;margin:0;font-size:inherit">초록 버튼</b>을 누르면 촬영이 시작돼요'}</div>
       ${Android.importExam?`<button class="btn" ${GSEL.length<1?'disabled':''} onclick="goImp()">${GSEL.length<1?'찍어 둔 영상: 영상 속 아이를 먼저 골라 주세요':'찍어 둔 영상 가져와서 '+GSEL.length+'명 심사 처리 ›'}</button>`:''}
       ${GSEL.length?'<button class="btn" onclick="GSEL=[];renderShoot()">다시 고르기</button>':''}</div>`:'');
+  paintGrpGo();
 }
+function paintGrpGo(){ const g=$('grpgo'); if(!g) return; const on=GRP&&GSEL.length>=2&&S.view==='shoot';
+  g.style.display=on?'block':'none'; g.innerHTML=on?`<button class="btn gogrp" onclick="goGrp()">● ${GSEL.length}명 같이 촬영 시작</button>`:'';
+  const L=$('shoot-list'); if(L) L.style.paddingBottom=on?'70px':''; }
 function setGrp(v){ GRP=v; if(!v) GSEL=[]; renderShoot(); }
 function gAdd(){ const el=$('gadd'); const v=(el&&el.value||'').trim(); if(!v) return;
   const n=allNames().find(x=>x===v)||allNames().find(x=>x.replace(/\(.*\)$/,'')===v); if(!n){ toast('명단에 없는 이름이에요'); return; }
   if(GSEL.includes(n)) return; if(GSEL.length>=4){ toast('한 번에 4명까지예요'); return; }
   if(!S.checked.includes(n)){ S.checked.push(n); save(); } GSEL.push(n); renderShoot(); }
-function goImp(){ if(!GSEL.length) return; Android.importExam(JSON.stringify(GSEL)); }
-function goGrp(){ if(GSEL.length<2) return; Android.recordGroup(JSON.stringify(GSEL)); }
+function goImp(){ if(!GSEL.length) return; const again=GSEL.filter(n=>S.done.includes(n));
+  let rep=false; if(again.length) rep=confirm(`${again.join(', ')}은(는) 오늘 이미 영상이 있어요.\n\n[확인] 전 영상은 지우고 이걸로 바꾸기\n[취소] 그대로 두고 한 개 더`);
+  if(Android.importExam2) Android.importExam2(JSON.stringify(GSEL),rep); else Android.importExam(JSON.stringify(GSEL)); }
+function goGrp(){ if(GSEL.length<2) return; const again=GSEL.filter(n=>S.done.includes(n));
+  let rep=false; if(again.length) rep=confirm(`${again.join(', ')}은(는) 오늘 이미 찍었어요.\n\n[확인] 전에 찍은 영상은 지우고 새 영상으로 바꾸기\n[취소] 그대로 두고 한 개 더`);
+  if(Android.recordGroup2) Android.recordGroup2(JSON.stringify(GSEL),rep); else Android.recordGroup(JSON.stringify(GSEL)); }
 $('shoot-list').addEventListener('click',e=>{
   const kb=e.target.closest('[data-kk]'); if(kb){ openMedia(dec(kb.dataset.kk)); return; }
   const r=e.target.closest('.row'); if(!r) return;
