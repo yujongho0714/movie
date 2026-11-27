@@ -100,6 +100,7 @@ public class MainActivity extends Activity {
     private static final int REQ_SONG = 5;
     private static final int REQ_IMPORT_PICK = 6;
     private static final int REQ_IMPORT = 7;
+    private static final int REQ_RESYNC = 8;
     private android.webkit.ValueCallback<Uri[]> fileCb;
     private static final String KAKAO = "com.kakao.talk";
 
@@ -383,6 +384,19 @@ public class MainActivity extends Activity {
                 Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("video/*");
                 try { startActivityForResult(i, REQ_IMPORT_PICK); } catch (Exception e) { toast("영상을 고를 수 없어요: " + e.getMessage()); }
+            } });
+        }
+
+        /* 예전에 찍은 영상 노래 다시 맞추기 (합격 처리 · 날짜 표시는 다시 안 해요) */
+        @JavascriptInterface
+        public int oldOfs() { return (int) (cfg().getLong("oldOfs", -1)); }
+        @JavascriptInterface
+        public void resync() {
+            main.post(new Runnable() { @Override public void run() {
+                if (selectedSong() == null) { toast("먼저 그때 쓴 노래를 골라 주세요"); return; }
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("video/*"); i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                try { startActivityForResult(i, REQ_RESYNC); } catch (Exception e) { toast("영상을 고를 수 없어요: " + e.getMessage()); }
             } });
         }
 
@@ -1021,11 +1035,74 @@ public class MainActivity extends Activity {
         else if (requestCode == REQ_SONG) onSongResult(resultCode, data);
         else if (requestCode == REQ_IMPORT_PICK) onImportPick(resultCode, data);
         else if (requestCode == REQ_IMPORT) onImportResult(resultCode, data);
+        else if (requestCode == REQ_RESYNC) onResyncPick(resultCode, data);
         else if (requestCode == REQ_FILE && fileCb != null) {
             Uri u = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
             fileCb.onReceiveValue(u != null ? new Uri[]{u} : null);
             fileCb = null;
         }
+    }
+
+    /* ---------- 예전에 찍은 영상 노래 다시 맞추기 ---------- */
+    private final ArrayDeque<Uri> rsq = new ArrayDeque<>();
+    private int rsTotal = 0, rsOk = 0;
+    private void onResyncPick(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) return;
+        List<Uri> us = new ArrayList<>();
+        if (data.getClipData() != null) for (int k = 0; k < data.getClipData().getItemCount(); k++) us.add(data.getClipData().getItemAt(k).getUri());
+        else if (data.getData() != null) us.add(data.getData());
+        if (us.isEmpty()) return;
+        rsq.addAll(us); rsTotal = us.size(); rsOk = 0;
+        toast("노래 다시 맞추는 중... " + rsTotal + "개");
+        resyncNext();
+    }
+    private long oldOfsMs() { long o = cfg().getLong("oldOfs", -1); if (o < 0) o = 450; return Math.max(0, o + cfg().getLong("syncMs", 0)); }
+    private void resyncNext() {
+        final Uri u = rsq.poll();
+        if (u == null) { final int ok = rsOk, tot = rsTotal; main.post(() -> { toast("노래 다시 맞추기 끝 · " + ok + " / " + tot + "개"); web.evaluateJavascript("window.onResyncDone&&window.onResyncDone(" + ok + "," + tot + ")", null); }); return; }
+        main.post(() -> {
+            try {
+                JSONObject sg = selectedSong();
+                String su = sg.optString("uri"); if (su.startsWith("asset:")) su = "asset:///" + su.substring(6);
+                long clip = oldOfsMs();
+                MediaItem vmi = new MediaItem.Builder().setUri(u).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(clip).build()).build();
+                EditedMediaItem item = new EditedMediaItem.Builder(vmi).setRemoveAudio(true).build();
+                EditedMediaItem song = new EditedMediaItem.Builder(MediaItem.fromUri(su)).setRemoveVideo(true).build();
+                Composition comp = new Composition.Builder(new EditedMediaItemSequence(item), new EditedMediaItemSequence(ImmutableList.of(song), true)).build();
+                File dir = new File(getCacheDir(), "videos"); if (!dir.exists()) dir.mkdirs();
+                final File out = new File(dir, "resync_" + System.nanoTime() + ".mp4");
+                Transformer t = new Transformer.Builder(this).setVideoMimeType(MimeTypes.VIDEO_H264)
+                        .addListener(new Transformer.Listener() {
+                            @Override public void onCompleted(Composition c, ExportResult r) { io.execute(() -> { try { replaceVideo(u, out); rsOk++; } catch (Exception e) { toast("저장 실패: " + e.getMessage()); } out.delete(); resyncNext(); }); }
+                            @Override public void onError(Composition c, ExportResult r, ExportException e) { out.delete(); toast("한 개를 못 맞췄어요: " + e.getMessage()); resyncNext(); }
+                        }).build();
+                t.start(comp, out.getAbsolutePath());
+            } catch (Exception e) { toast("한 개를 못 맞췄어요: " + e.getMessage()); io.execute(this::resyncNext); }
+        });
+    }
+    /** 고친 영상을 원래 영상 자리(같은 앨범 · 같은 이름)에 넣고 원래 것은 지워요 */
+    private void replaceVideo(Uri src, File f) throws Exception {
+        ContentResolver cr = getContentResolver();
+        Uri mu = src;
+        try { Uri m = MediaStore.getMediaUri(this, src); if (m != null) mu = m; } catch (Exception ignored) {}
+        String name = "resync_" + System.currentTimeMillis() + ".mp4", rel = "Movies/" + ROOT; long taken = System.currentTimeMillis();
+        try (Cursor c = cr.query(mu, new String[]{MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.RELATIVE_PATH, MediaStore.Video.Media.DATE_TAKEN}, null, null, null)) {
+            if (c != null && c.moveToFirst()) { if (c.getString(0) != null) name = c.getString(0); if (c.getString(1) != null) rel = c.getString(1); if (c.getLong(2) > 0) taken = c.getLong(2); }
+        } catch (Exception ignored) {}
+        boolean deleted = false;
+        try { deleted = cr.delete(mu, null, null) > 0; } catch (Exception ignored) {}
+        ContentValues v = new ContentValues();
+        v.put(MediaStore.Video.Media.DISPLAY_NAME, deleted ? name : name.replaceAll("\\.mp4$", "") + "_노래맞춤.mp4");
+        v.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+        v.put(MediaStore.Video.Media.RELATIVE_PATH, rel);
+        v.put(MediaStore.Video.Media.DATE_TAKEN, taken);
+        v.put(MediaStore.Video.Media.IS_PENDING, 1);
+        Uri out = cr.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v);
+        if (out == null) throw new Exception("저장 위치를 만들지 못했어요");
+        try (InputStream in = new FileInputStream(f); OutputStream os = cr.openOutputStream(out)) {
+            byte[] buf = new byte[1024 * 256]; int n; while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+        } catch (Exception e) { cr.delete(out, null, null); throw e; }
+        ContentValues d = new ContentValues(); d.put(MediaStore.Video.Media.IS_PENDING, 0); cr.update(out, d, null, null);
     }
 
     private void onImportPick(int resultCode, Intent data) {
@@ -1118,7 +1195,7 @@ public class MainActivity extends Activity {
         j.name = name;
         j.dateMs = at;
         j.replace = replace;
-        if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; j.songOfs = data.getLongExtra(RecordActivity.EX_SONGOFS, 0); }
+        if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; j.songOfs = data.getLongExtra(RecordActivity.EX_SONGOFS, 0); long oo = data.getLongExtra("oldOfs", -1); if (oo >= 0) cfg().edit().putLong("oldOfs", oo).apply(); }
         JSONArray missA = null;
         try { String ms = data != null ? data.getStringExtra(RecordActivity.EX_MISS) : null; if (ms != null) { missA = new JSONArray(ms); if (missA.length() > 0) setJudge(j, missA.getJSONArray(0));  } } catch (Exception ignored) {}
         if (resultCode != RESULT_OK) {

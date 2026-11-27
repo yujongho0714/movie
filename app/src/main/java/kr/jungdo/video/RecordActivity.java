@@ -389,7 +389,7 @@ public class RecordActivity extends ComponentActivity {
 
     /* ---------------- 노래 (블루투스 스피커로도 나가요) ---------------- */
     /* 노래는 미리 준비해 두고 녹화가 시작되는 순간 바로 틀어요 · 실제로 틀어진 시각을 재서 저장할 때 영상과 맞춰요 */
-    private long songAt = 0;
+    private long songAt = 0, prepMs = 0;
     private boolean prepared = false;
     private void prepSong() {
         if (songUri == null || !songOn || (player != null && prepared)) return;
@@ -405,7 +405,9 @@ public class RecordActivity extends ComponentActivity {
                 fd.close();
             } else player.setDataSource(this, Uri.parse(songUri));
             player.setLooping(true);
+            long t0 = System.currentTimeMillis();
             player.prepare();
+            prepMs = System.currentTimeMillis() - t0;
             prepared = true;
         } catch (Exception e) {
             prepared = false;
@@ -427,6 +429,11 @@ public class RecordActivity extends ComponentActivity {
             if (t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == 26 /* BLE 스피커 */ || t == 27) { lat = 250; break; } } } catch (Exception ignored) {}
         return Math.max(0, Math.min(3000, songAt - startMs + lat));
     }
+    /** 예전 버전(녹화 누른 뒤에 노래를 열던 때)에 노래가 늦게 들렸던 시간 추정: 노래 여는 시간 + 틀기 + 스피커 지연 */
+    private long oldOffset() {
+        long lat = songOffset() - Math.max(0, songAt - startMs);
+        return Math.max(0, Math.min(3000, prepMs + 60 + Math.max(60, lat)));
+    }
     private void stopSong() {
         prepared = false;
         if (player != null) { try { player.stop(); } catch (Exception ignored) {} player.release(); player = null; }
@@ -440,6 +447,7 @@ public class RecordActivity extends ComponentActivity {
         Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath()).putExtra(EX_SONG, songUri != null && songOn ? songUri : "");
         if (judge != null) r.putExtra(EX_MISS, judge.json());
         r.putExtra(EX_SONGOFS, songOffset());
+        if (songAt > 0) r.putExtra("oldOfs", oldOffset());
         if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString(gridKey(), grid.save()).apply(); }
         setResult(RESULT_OK, r);
         finish();
