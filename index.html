@@ -468,6 +468,7 @@ async function rosterSync(){
     snap.forEach(d=>{ const x=d.data(); const nm=String(x.name||'').trim(); if(!nm||x.demo) return;
       // 퇴관: 그 달까지만 보이고 다음 달부터 빠져요
       if(x.status==='LEFT'&&String(x.leftMonth||'')<mk) return;
+      if(x.staff===true||nm==='유종호'||/^(관장|부관장|사범|코치)$/.test(String(x.grade||'').trim())) return;   // 관장 · 사범은 수련생 아님
       L.push({id:d.id,nm,g:gradeOfS(x),belt:normBelt(x.belt),jump:String(x.jumpGrade||'')}) });
     const cnt={};L.forEach(o=>cnt[o.nm]=(cnt[o.nm]||0)+1);
     const nd={};GRADES.forEach(g=>nd[g]=[]);SID={};INFO={};
