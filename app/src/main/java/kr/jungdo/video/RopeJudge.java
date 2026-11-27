@@ -81,23 +81,34 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
             int W = b.getWidth(), H = b.getHeight();
             for (int i = 0; i < n && on; i++) {
                 float[] q = bx != null && i < bx.length ? bx[i] : new float[]{0, 0, 1, 1};
-                int x = clamp((int) (q[0] * W), 0, W - 2), y = clamp((int) (q[1] * H), 0, H - 2);
-                int w = clamp((int) ((q[2] - q[0]) * W), 2, W - x), h = clamp((int) ((q[3] - q[1]) * H), 2, H - y);
+                int bx0 = clamp((int) (q[0] * W), 0, W - 2), by0 = clamp((int) (q[1] * H), 0, H - 2);
+                int bx1 = clamp((int) (q[2] * W), bx0 + 2, W), by1 = clamp((int) (q[3] * H), by0 + 2, H);
+                // 아이가 작게 찍혀도 또렷하게: 지난번에 찾은 아이 둘레만 크게 잘라서 봐요 (못 찾으면 칸 전체)
+                Track T = tr[i]; boolean zoom = T.roi != null;
+                int x = bx0, y = by0, x2 = bx1, y2 = by1;
+                if (zoom) { x = Math.max(bx0, T.roi[0]); y = Math.max(by0, T.roi[1]); x2 = Math.min(bx1, T.roi[2]); y2 = Math.min(by1, T.roi[3]); if (x2 - x < 40 || y2 - y < 60) { zoom = false; x = bx0; y = by0; x2 = bx1; y2 = by1; } }
+                int w = x2 - x, h = y2 - y;
                 Bitmap c = Bitmap.createBitmap(b, x, y, w, h);
                 Float ay = null; float sc = 0;
                 try {
                     Pose pose = Tasks.await(det[i].process(InputImage.fromBitmap(c, 0)));
-                    // 사람이 진짜 있을 때만: 코 · 어깨 · 골반 · 무릎 · 발목이 다 또렷하고, 위에서 아래로 순서가 맞고, 칸 높이의 35% 이상 크게 보여야 해요
+                    // 사람이 진짜 있을 때만: 코 · 어깨 · 골반 · 무릎 · 발목이 다 또렷하고, 위에서 아래로 순서가 맞아야 해요
                     int[] K = {PoseLandmark.NOSE, PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER, PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP,
                             PoseLandmark.LEFT_KNEE, PoseLandmark.RIGHT_KNEE, PoseLandmark.LEFT_ANKLE, PoseLandmark.RIGHT_ANKLE};
-                    float[] Y = new float[K.length]; boolean ok = true;
-                    for (int k = 0; k < K.length && ok; k++) { PoseLandmark l = pose.getPoseLandmark(K[k]); if (l == null || l.getInFrameLikelihood() < 0.8f) ok = false; else Y[k] = l.getPosition().y; }
+                    float[] X = new float[K.length], Y = new float[K.length]; boolean ok = true;
+                    for (int k = 0; k < K.length && ok; k++) { PoseLandmark l = pose.getPoseLandmark(K[k]); if (l == null || l.getInFrameLikelihood() < 0.8f) ok = false; else { X[k] = l.getPosition().x; Y[k] = l.getPosition().y; } }
                     if (ok) {
                         float nose = Y[0], sh = (Y[1] + Y[2]) / 2f, hip = (Y[3] + Y[4]) / 2f, knee = (Y[5] + Y[6]) / 2f, ank = (Y[7] + Y[8]) / 2f, body = ank - nose;
-                        if (nose < sh && sh < hip && hip < knee && knee < ank && body > h * 0.35f) { ay = (hip + ank) / 2f; sc = ank - sh; }   // 골반+발목: 몸 전체가 떠야 1개
+                        if (nose < sh && sh < hip && hip < knee && knee < ank && body > h * (zoom ? 0.3f : 0.1f) && body > 40) {
+                            ay = (hip + ank) / 2f; sc = ank - sh;   // 골반+발목: 몸 전체가 떠야 1개
+                            float mnx = 1e9f, mxx = -1e9f; for (float v : X) { mnx = Math.min(mnx, v); mxx = Math.max(mxx, v); }
+                            float cx = x + (mnx + mxx) / 2f, cy = y + (nose + ank) / 2f, half = Math.max(body * 0.85f, (mxx - mnx) * 1.2f);
+                            T.roi = new int[]{(int) (cx - half * 0.75f), (int) (cy - half), (int) (cx + half * 0.75f), (int) (cy + half)};
+                        }
                     }
                 } catch (Exception ignored) {}
-                synchronized (tr) { tr[i].feed(t, ay, sc); }
+                if (ay == null) T.roi = null;
+                synchronized (tr) { T.feed(t, ay, sc); }
             }
             post();
         } catch (Throwable ignored) {
@@ -113,20 +124,25 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
         float ext = Float.NaN, scale = 0;
         long lastJump = 0, firstRun = 0;
         final java.util.ArrayList<Long> missT = new java.util.ArrayList<>(), jumpT = new java.util.ArrayList<>();
-        static final float THR = 0.04f;       // 몸 길이(어깨~발목)의 4% 넘게 몸 전체가 오르내리면 한 번 뜀
+        static final float THR = 0.045f;      // 몸 길이(어깨~발목)의 4.5% 넘게 몸 전체가 오르내리면 한 번 뜀
         static final long STOP_MS = 900;      // 뛰다가 이만큼 멈추면 걸림
 
-        int seen = 0; long lastSeen = 0;
+        int seen = 0; long lastSeen = 0, tUp = 0; float sm = Float.NaN; int[] roi;
         void feed(long t, Float y, float sc) {
-            if (y == null) { seen = 0; ext = Float.NaN; up = false; }      // 사람이 안 보이면 세던 걸 처음부터 (빈 화면에서 안 세요)
-            else if (++seen < 3) { lastSeen = t; ext = Float.NaN; }       // 3장 연속 또렷하게 보여야 세기 시작
+            if (y == null) { seen = 0; ext = Float.NaN; sm = Float.NaN; up = false; }      // 사람이 안 보이면 세던 걸 처음부터 (빈 화면에서 안 세요)
+            else if (++seen < 3) { lastSeen = t; ext = Float.NaN; sm = Float.NaN; scale = sc; }   // 3장 연속 또렷하게 보여야 세기 시작
             else {
                 lastSeen = t;
                 scale = scale <= 0 ? sc : scale * 0.9f + sc * 0.1f;
-                float v = y / Math.max(1f, scale);
+                float v0 = y / Math.max(1f, scale);
+                sm = Float.isNaN(sm) ? v0 : sm * 0.45f + v0 * 0.55f;     // 떨림 줄이기
+                float v = sm;
                 if (Float.isNaN(ext)) { ext = v; up = false; }
-                else if (!up) { if (v > ext) ext = v; else if (ext - v > THR) { up = true; ext = v; } }      // 화면 위쪽 = y 작음
-                else { if (v < ext) ext = v; else if (v - ext > THR) { up = false; ext = v; if (t - lastJump > 180) jump(t); } }
+                else if (!up) { if (v > ext) ext = v; else if (ext - v > THR) { up = true; ext = v; tUp = t; } }      // 화면 위쪽 = y 작음
+                else { if (v < ext) ext = v; else if (v - ext > THR) { up = false; ext = v;
+                    // 진짜 점프는 떴다 내려오는 데 0.8초 안 걸려요 (천천히 움직이거나 자세 바꾸는 건 안 세요)
+                    if (t - tUp < 800 && t - lastJump > 200) jump(t); } }
+                if (up && t - tUp > 1200) { up = false; ext = v; }
             }
             if (active && t - lastJump > STOP_MS) { miss++; since = 0; missed = true; active = false; missT.add(lastJump + 300); }
         }
