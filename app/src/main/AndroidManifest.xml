@@ -50,7 +50,7 @@
         <activity
             android:name=".RecordActivity"
             android:exported="false"
-            android:screenOrientation="unspecified"
+            android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
     </application>

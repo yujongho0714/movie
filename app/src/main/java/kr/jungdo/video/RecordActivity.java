@@ -137,7 +137,8 @@ public class RecordActivity extends ComponentActivity {
         if (names.length > 1) preview.setScaleType(PreviewView.ScaleType.FIT_CENTER);   // 화면에 보이는 그대로 = 녹화되는 그대로 (칸 위치가 정확하게)
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
         if (names.length > 1) {
-            grid = new Grid(this, names, gridPrefs().getString("g" + names.length, null));
+            grid = new Grid(this, names, gridPrefs().getString(gridKey(), null));
+            grid.onTouch = () -> hint.setVisibility(View.GONE);
             root.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         }
 
@@ -150,7 +151,7 @@ public class RecordActivity extends ComponentActivity {
         top.addView(timer);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
-        hint = pill(names.length > 1 ? "칸 안에 이름 순서대로 세워 주세요 · 칸은 끌어서 옮기고 모서리로 크기 조절" : "빨간 버튼을 누르면 녹화" + (songUri != null ? "와 노래가 같이 시작돼요" : "가 시작돼요"), 0x99000000, 13);
+        hint = pill(names.length > 1 ? "폰을 가로로 돌려도 돼요 · 칸은 끌어서 옮기고 점으로 크기 조절 · 위아래는 모든 칸 같이" : "빨간 버튼을 누르면 녹화" + (songUri != null ? "와 노래가 같이 시작돼요" : "가 시작돼요"), 0x99000000, 13);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); hl.topMargin = dp(70);
         root.addView(hint, hl);
 
@@ -263,7 +264,7 @@ public class RecordActivity extends ComponentActivity {
     private void stopRec() {
         if (recording != null) recording.stop();
         if (grid != null) { grid.locked = false; grid.invalidate(); }
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         recBtn.setText("녹화");
         ((GradientDrawable) recBtn.getBackground()).setColor(0xFFE24850);
         flipBtn.setVisibility(View.VISIBLE);
@@ -301,7 +302,7 @@ public class RecordActivity extends ComponentActivity {
     private void finishOk() {
         if (!hasClip) return;
         Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath());
-        if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString("g" + names.length, grid.save()).apply(); }
+        if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString(gridKey(), grid.save()).apply(); }
         setResult(RESULT_OK, r);
         finish();
     }
@@ -327,43 +328,62 @@ public class RecordActivity extends ComponentActivity {
         if (recording != null) {
             discard = true; recording.stop(); recording = null; stopSong(); deleteOut();
             hasClip = false;
-            h.post(() -> { if (grid != null) { grid.locked = false; grid.invalidate(); } setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED); showDone(false); recBtn.setText("녹화"); ((GradientDrawable) recBtn.getBackground()).setColor(0xFFE24850); flipBtn.setVisibility(View.VISIBLE);
+            h.post(() -> { if (grid != null) { grid.locked = false; grid.invalidate(); } setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR); showDone(false); recBtn.setText("녹화"); ((GradientDrawable) recBtn.getBackground()).setColor(0xFFE24850); flipBtn.setVisibility(View.VISIBLE);
                 hint.setText("화면을 벗어나서 녹화를 취소했어요 · 다시 찍어요"); hint.setVisibility(View.VISIBLE); });
         }
     }
     private SharedPreferences gridPrefs() { return getSharedPreferences("grid", MODE_PRIVATE); }
 
     /* ---------------- 여러 명 칸 (끌어서 옮기기 · 모서리로 크기 조절) ---------------- */
+    private String gridKey() { return "g" + names.length + (getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE ? "L" : "P"); }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        // 폰을 돌리면 화면도 같이 돌고, 카메라를 다시 연결해서 영상 방향을 맞춰요 (칸은 가로·세로 따로 기억)
+        if (recording == null && !hasClip) {
+            startCamera();
+            if (grid != null) { if (!grid.load(gridPrefs().getString(gridKey(), null))) grid.reset(); }
+        }
+    }
+
+    /* ---------------- 여러 명 칸 ----------------
+       · 칸은 세로로 길게 나란히 (아이들이 옆으로 나란히 서요)
+       · 칸 가운데를 끌면: 그 칸은 옆으로, 위아래는 4칸이 한꺼번에 움직여요
+       · 왼쪽 위 점: 그 칸 왼쪽 끝 + 모든 칸 위쪽 / 오른쪽 아래 점: 그 칸 오른쪽 끝 + 모든 칸 아래쪽 */
     static class Grid extends View {
         static final int[] COL = {0xFFE24850, 0xFF3A8FE0, 0xFF38B75C, 0xFFF2B233};
         final String[] names; final float[][] r; final RectF box = new RectF(); final float d;
-        boolean locked = false; int drag = -1; boolean resize = false; float lx, ly;
-        final Paint st = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tx = new Paint(Paint.ANTI_ALIAS_FLAG), dim = new Paint();
+        float top = 0.10f, bot = 0.80f;
+        boolean locked = false; int drag = -1, mode = 0; float lx, ly;
+        Runnable onTouch;
+        final Paint st = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tx = new Paint(Paint.ANTI_ALIAS_FLAG), shade = new Paint();
         Grid(android.content.Context c, String[] names, String saved) {
             super(c); this.names = names; d = c.getResources().getDisplayMetrics().density;
-            r = new float[names.length][4];
+            r = new float[names.length][2];
             st.setStyle(Paint.Style.STROKE); st.setStrokeWidth(3 * d);
-            tx.setColor(Color.WHITE); tx.setTextSize(16 * d); tx.setTypeface(Typeface.DEFAULT_BOLD);
-            dim.setColor(0x66000000);
+            tx.setColor(Color.WHITE); tx.setTypeface(Typeface.DEFAULT_BOLD);
+            shade.setColor(0x55000000);
             if (!load(saved)) reset();
         }
         void reset() {
-            int n = names.length; float g = 0.015f, w = (1f - g * (n + 1)) / n;
-            for (int i = 0; i < n; i++) { r[i][0] = g + i * (w + g); r[i][2] = r[i][0] + w; r[i][1] = 0.06f; r[i][3] = 0.97f; }
-            invalidate();
+            int n = names.length; float g = 0.012f, w = (1f - g * (n + 1)) / n;
+            for (int i = 0; i < n; i++) { r[i][0] = g + i * (w + g); r[i][1] = r[i][0] + w; }
+            top = 0.10f; bot = 0.80f; invalidate();
         }
         boolean load(String s) {
             if (s == null) return false;
-            try { String[] p = s.split(";"); if (p.length != r.length) return false;
-                for (int i = 0; i < p.length; i++) { String[] q = p[i].split(","); for (int k = 0; k < 4; k++) r[i][k] = Float.parseFloat(q[k]); }
-                return true; } catch (Exception e) { return false; }
+            try { String[] p = s.split(";"); if (p.length != r.length + 1) return false;
+                String[] tb = p[0].split(","); top = Float.parseFloat(tb[0]); bot = Float.parseFloat(tb[1]);
+                for (int i = 0; i < r.length; i++) { String[] q = p[i + 1].split(","); r[i][0] = Float.parseFloat(q[0]); r[i][1] = Float.parseFloat(q[1]); }
+                invalidate(); return true; } catch (Exception e) { return false; }
         }
-        String save() { StringBuilder b = new StringBuilder(); for (float[] q : r) { if (b.length() > 0) b.append(';'); b.append(q[0]).append(',').append(q[1]).append(',').append(q[2]).append(',').append(q[3]); } return b.toString(); }
+        String save() { StringBuilder b = new StringBuilder().append(top).append(',').append(bot); for (float[] q : r) b.append(';').append(q[0]).append(',').append(q[1]); return b.toString(); }
         /** 녹화된 영상 기준 칸 위치 (0~1). 앞 카메라는 화면이 거울처럼 보여서 좌우를 뒤집어요 */
         String videoRects(boolean mirror) {
             JSONArray a = new JSONArray();
-            try { for (float[] q : r) { JSONArray o = new JSONArray(); float x0 = mirror ? 1 - q[2] : q[0], x1 = mirror ? 1 - q[0] : q[2];
-                o.put((double) x0).put((double) q[1]).put((double) x1).put((double) q[3]); a.put(o); } } catch (Exception ignored) {}
+            try { for (float[] q : r) { JSONArray o = new JSONArray(); float x0 = mirror ? 1 - q[1] : q[0], x1 = mirror ? 1 - q[0] : q[1];
+                o.put((double) x0).put((double) top).put((double) x1).put((double) bot); a.put(o); } } catch (Exception ignored) {}
             return a.toString();
         }
         private void calc() {
@@ -372,17 +392,28 @@ public class RecordActivity extends ComponentActivity {
             if (vw / vh > ar) { ch = vh; cw = vh * ar; } else { cw = vw; ch = vw / ar; }
             box.set((vw - cw) / 2, (vh - ch) / 2, (vw + cw) / 2, (vh + ch) / 2);
         }
-        private RectF px(float[] q) { return new RectF(box.left + q[0] * box.width(), box.top + q[1] * box.height(), box.left + q[2] * box.width(), box.top + q[3] * box.height()); }
+        private RectF px(int i) { return new RectF(box.left + r[i][0] * box.width(), box.top + top * box.height(), box.left + r[i][1] * box.width(), box.top + bot * box.height()); }
         @Override protected void onDraw(Canvas c) {
             calc();
+            // 칸 밖(잘려 나가는 부분)은 살짝 어둡게
+            float yt = box.top + top * box.height(), yb = box.top + bot * box.height();
+            c.drawRect(box.left, box.top, box.right, yt, shade); c.drawRect(box.left, yb, box.right, box.bottom, shade);
             for (int i = 0; i < r.length; i++) {
-                RectF p = px(r[i]); int col = COL[i % COL.length];
+                RectF p = px(i); int col = COL[i % COL.length];
                 st.setColor(col); c.drawRect(p, st);
-                String t = (i + 1) + "  " + names[i];
-                float tw = tx.measureText(t), ph = 26 * d;
-                fill.setColor(col); c.drawRoundRect(new RectF(p.left, p.top, p.left + tw + 16 * d, p.top + ph), 6 * d, 6 * d, fill);
-                c.drawText(t, p.left + 8 * d, p.top + ph / 2 - (tx.descent() + tx.ascent()) / 2, tx);
-                if (!locked) { fill.setColor(col); c.drawCircle(p.right, p.bottom, 11 * d, fill); fill.setColor(Color.WHITE); c.drawCircle(p.right, p.bottom, 4 * d, fill); }
+                // 이름: 칸 너비에 맞게 글자 크기를 줄여요
+                String t = (i + 1) + " " + names[i];
+                float ts = 16 * d; tx.setTextSize(ts);
+                float maxW = p.width() - 10 * d;
+                while (tx.measureText(t) > maxW && ts > 10 * d) { ts -= d; tx.setTextSize(ts); }
+                while (tx.measureText(t) > maxW && t.length() > 3) t = t.substring(0, t.length() - 2) + "…";
+                float ph = ts * 1.6f;
+                fill.setColor(col); c.drawRoundRect(new RectF(p.left, p.top, p.left + tx.measureText(t) + 10 * d, p.top + ph), 5 * d, 5 * d, fill);
+                c.drawText(t, p.left + 5 * d, p.top + ph / 2 - (tx.descent() + tx.ascent()) / 2, tx);
+                if (!locked) {
+                    fill.setColor(col); c.drawCircle(p.left, p.top, 10 * d, fill); c.drawCircle(p.right, p.bottom, 10 * d, fill);
+                    fill.setColor(Color.WHITE); c.drawCircle(p.left, p.top, 4 * d, fill); c.drawCircle(p.right, p.bottom, 4 * d, fill);
+                }
             }
         }
         @Override public boolean onTouchEvent(MotionEvent e) {
@@ -391,15 +422,23 @@ public class RecordActivity extends ComponentActivity {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     calc(); drag = -1;
-                    for (int i = r.length - 1; i >= 0 && drag < 0; i--) { RectF p = px(r[i]); if (Math.hypot(x - p.right, y - p.bottom) < 30 * d) { drag = i; resize = true; } }
-                    for (int i = r.length - 1; i >= 0 && drag < 0; i--) { if (px(r[i]).contains(x, y)) { drag = i; resize = false; } }
-                    lx = x; ly = y; return drag >= 0;
+                    for (int i = r.length - 1; i >= 0 && drag < 0; i--) { RectF p = px(i);
+                        if (Math.hypot(x - p.right, y - p.bottom) < 30 * d) { drag = i; mode = 2; }
+                        else if (Math.hypot(x - p.left, y - p.top) < 30 * d) { drag = i; mode = 1; } }
+                    for (int i = r.length - 1; i >= 0 && drag < 0; i--) { if (px(i).contains(x, y)) { drag = i; mode = 0; } }
+                    lx = x; ly = y; if (drag >= 0 && onTouch != null) onTouch.run(); return drag >= 0;
                 case MotionEvent.ACTION_MOVE:
                     if (drag < 0 || box.width() <= 0) return false;
                     float dx = (x - lx) / box.width(), dy = (y - ly) / box.height(); lx = x; ly = y;
                     float[] q = r[drag];
-                    if (resize) { q[2] = Math.max(q[0] + 0.1f, Math.min(1f, q[2] + dx)); q[3] = Math.max(q[1] + 0.12f, Math.min(1f, q[3] + dy)); }
-                    else { float w = q[2] - q[0], hh = q[3] - q[1]; q[0] = Math.max(0f, Math.min(1f - w, q[0] + dx)); q[1] = Math.max(0f, Math.min(1f - hh, q[1] + dy)); q[2] = q[0] + w; q[3] = q[1] + hh; }
+                    if (mode == 0) {           // 옮기기: 이 칸은 옆으로, 위아래는 모든 칸 같이
+                        float w = q[1] - q[0]; q[0] = Math.max(0f, Math.min(1f - w, q[0] + dx)); q[1] = q[0] + w;
+                        float hh = bot - top; top = Math.max(0f, Math.min(1f - hh, top + dy)); bot = top + hh;
+                    } else if (mode == 1) {    // 왼쪽 위 점
+                        q[0] = Math.max(0f, Math.min(q[1] - 0.06f, q[0] + dx)); top = Math.max(0f, Math.min(bot - 0.1f, top + dy));
+                    } else {                   // 오른쪽 아래 점
+                        q[1] = Math.min(1f, Math.max(q[0] + 0.06f, q[1] + dx)); bot = Math.min(1f, Math.max(top + 0.1f, bot + dy));
+                    }
                     invalidate(); return true;
                 default: drag = -1; return true;
             }
