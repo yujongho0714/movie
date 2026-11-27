@@ -179,9 +179,9 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
       </div>
     </details>
     <details id="attbox">
-      <summary>출결 앱 연결 (태권도 합격하면 띠 올리기) <span id="attst"></span></summary>
+      <summary>출결 앱 연결 (명단 · 띠 · 줄넘기 급 같이 움직이기) <span id="attst"></span></summary>
       <div class="box">
-        <div class="sub" style="margin-bottom:8px">출결 앱의 <b>연결 코드</b>(JD1-…)와 원장님 출결 계정을 한 번만 넣어 두면, 태권도 심사 영상을 [완료 · 저장]할 때 그 아이 띠가 한 단계 올라가요. 빨검띠 · 1품 · 2품 · 3품은 그대로예요.</div>
+        <div class="sub" style="margin-bottom:8px">출결 앱의 <b>연결 코드</b>(JD1-…)와 원장님 출결 계정을 한 번만 넣어 두면, 심사 영상을 [완료 · 저장]할 때 태권도는 띠, 줄넘기는 급이 한 단계 올라가요 (빨검띠 · 1품 · 2품 · 3품 · 줄넘기 1급은 그대로). 명단도 출결 앱 명단을 따라가서 퇴관한 아이는 다음 달부터 안 보여요.</div>
         <input type="text" id="at-code" placeholder="연결 코드 JD1-…">
         <input type="email" id="at-email" placeholder="출결 계정 이메일" style="margin-top:6px">
         <input type="password" id="at-pw" placeholder="비밀번호" style="margin-top:6px">
@@ -354,7 +354,7 @@ function renderCheck(){
     if(!arr.length) return;
     if(tab==='전체') html+=`<div class="grade">${g}</div>`;
     html+=arr.map(n=>{ const on=S.checked.includes(n);
-      return `<div class="row ${on?'on':''}" data-n="${enc(n)}" data-g="${g}"><span class="chk">${on?'✓':''}</span><span class="nm">${esc(n)}</span>${isMissed(n)?'<span class="tag">못 찍음</span>':''}</div>`; }).join('');
+      return `<div class="row ${on?'on':''}" data-n="${enc(n)}" data-g="${g}"><span class="chk">${on?'✓':''}</span><span class="nm">${esc(n)}${beltTag(n)}</span>${isMissed(n)?'<span class="tag">못 찍음</span>':''}</div>`; }).join('');
   });
   $('check-list').innerHTML=html||'<div class="empty">조건에 맞는 원생이 없어요.</div>';
   $('chk-info').textContent=S.checked.length+'명';
@@ -393,7 +393,7 @@ function resetRoster(){ if(!confirm('명단을 엑셀 기준 처음 상태로 �
 
 /* ---------- 심사 종류 ---------- */
 const MODE_N={tkd:'태권도',jump:'줄넘기'};
-function renderMode(){ $('modebox').innerHTML=['tkd','jump'].map(m=>`<button class="${S.mode===m?'on':''}" onclick="setMode('${m}')">${MODE_N[m]} 심사<small>${m==='tkd'?'완료하면 합격 · 띠 올라감':'영상만 저장'}</small></button>`).join(''); }
+function renderMode(){ $('modebox').innerHTML=['tkd','jump'].map(m=>`<button class="${S.mode===m?'on':''}" onclick="setMode('${m}')">${MODE_N[m]} 심사<small>${m==='tkd'?'완료하면 합격 · 띠 올라감':'완료하면 합격 · 급 올라감'}</small></button>`).join(''); }
 function setMode(m){ S.mode=m; save(); if(window.Android&&Android.setMode) Android.setMode(m); renderCheck(); }
 
 /* ---------- 노래 (골라 두면 계속 그 노래 · 바꿀 때까지) ---------- */
@@ -415,6 +415,7 @@ window.onSongs=n=>{ renderSongs(); toast(n?`노래 ${n}곡을 넣었어요`:'노
 const BELTS=['흰띠','흰노띠','노랑띠','노초띠','초록띠','초파띠','파랑띠','보라띠','밤띠','밤빨띠','빨강띠','빨검띠'];
 const normBelt=raw=>{ const t=String(raw||'').trim().replace(/\s+/g,' '); if(!t) return ''; if(BELTS.includes(t)) return t; const m=t.match(/^(\d+)\s*품\s*(\d+)?\s*급?$/); if(m){ const p=+m[1]; const g=m[2]?+m[2]:p*12; return `${p}품 ${g}급`; } return t; };
 const KEEP=b=>b==='빨검띠'||/^\d+품/.test(b);   // 빨검띠 · 1품 · 2품 · 3품 → 국기원 심사라 그대로
+const JUMPS=['9급','8급','7급','6급','5급','4급','3급','2급','1급'];   // 1급 · 주니어 급은 주니어 심사라 그대로
 const AT={}; const AT_SDK='https://www.gstatic.com/firebasejs/10.12.2/';
 const atGet=(k,d)=>{ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } };
 const atSet=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
@@ -429,40 +430,73 @@ async function atReady(){
   AT.fs=fs; AT.db=fs.getFirestore(app);
   const cr=await au.signInWithEmailAndPassword(auth,c.email,c.pw); AT.user=cr.user; return true;
 }
+let SID={},INFO={};
+const thisYear=()=>new Date().getFullYear();
+function labelOf(age){ if(age<=0) return ''; if(age<=7) return '유치부'; if(age<14) return `${age-7}학년`; return '중학생'; }
+function gradeOfS(s){ const a=(s.age>0&&s.ageYear>0)?s.age+(thisYear()-s.ageYear):0; let g=a>0?labelOf(a):String(s.grade||''); if(/^중|^고|중고등|4\/5\/6/.test(g)) g='중학생'; if(g==='6~7세') g='유치부'; return GRADES.includes(g)?g:(g||'기타'); }
+let rosterUnsub=null;
+async function rosterSync(){
+  if(rosterUnsub) return; if(!await atReady()) return;
+  rosterUnsub=AT.fs.onSnapshot(AT.fs.collection(AT.db,'students'),snap=>{
+    const mk=monKey(); const L=[];
+    snap.forEach(d=>{ const x=d.data(); const nm=String(x.name||'').trim(); if(!nm||x.demo) return;
+      // 퇴관: 그 달까지만 보이고 다음 달부터 빠져요
+      if(x.status==='LEFT'&&String(x.leftMonth||'')<mk) return;
+      L.push({id:d.id,nm,g:gradeOfS(x),belt:normBelt(x.belt),jump:String(x.jumpGrade||'')}) });
+    const cnt={};L.forEach(o=>cnt[o.nm]=(cnt[o.nm]||0)+1);
+    const nd={};GRADES.forEach(g=>nd[g]=[]);SID={};INFO={};
+    L.forEach(o=>{ const key=cnt[o.nm]>1?`${o.nm}(${o.g})`:o.nm; (nd[o.g]=nd[o.g]||[]).push(key); SID[key]=o.id; INFO[key]=o; });
+    if(nd['기타']&&!nd['기타'].length) delete nd['기타'];
+    data=nd; if(nd['기타']&&!GRADES.includes('기타')) GRADES.push('기타');
+    S.checked=S.checked.filter(n=>SID[n]); save();
+    const st=$('attst'); if(st) st.textContent=`· 출결 명단 ${L.length}명과 같이 움직여요`;
+    try{ render(); }catch(e){}
+  },e=>{ const st=$('attst'); if(st) st.textContent='· 명단 불러오기 실패'; });
+}
+const beltTag=n=>{ const o=INFO[n]; if(!o) return ''; const t=S.mode==='jump'?(o.jump?'줄넘기 '+o.jump:'줄넘기 급 없음'):(o.belt||'띠 없음'); return `<span class="tag" style="background:var(--soft);color:var(--sub)">${esc(t)}</span>`; };
 async function atSave(){
   const code=$('at-code').value.trim(), email=$('at-email').value.trim(), pw=$('at-pw').value;
   if(!atCfg(code)){ $('at-msg').textContent='연결 코드를 확인해 주세요 (JD1- 로 시작)'; return; }
   if(!email||!pw){ $('at-msg').textContent='이메일과 비밀번호를 넣어 주세요'; return; }
   atSet('jd2_att',{code,email,pw}); AT.db=null; AT.user=null; $('at-msg').textContent='연결 중…';
-  try{ await atReady(); const n=(await AT.fs.getDocs(AT.fs.collection(AT.db,'students'))).size; $('at-msg').textContent=`연결됐어요 · 원생 ${n}명`; renderAtt(); runPromo(); }
+  try{ await atReady(); const n=(await AT.fs.getDocs(AT.fs.collection(AT.db,'students'))).size; $('at-msg').textContent=`연결됐어요 · 원생 ${n}명 · 이제 명단도 출결 앱을 따라가요`; rosterUnsub=null; rosterSync(); renderAtt(); runPromo(); }
   catch(e){ $('at-msg').textContent='연결 실패: '+(e.code||e.message); }
 }
-function renderAtt(){ const c=atGet('jd2_att',null); $('attst').textContent=c?'· 연결됨':'· 안 됨'; if(c){ $('at-code').value=c.code; $('at-email').value=c.email; }
+function renderAtt(){ const c=atGet('jd2_att',null); if(!rosterUnsub) $('attst').textContent=c?'· 연결됨':'· 안 됨'; if(c){ $('at-code').value=c.code; $('at-email').value=c.email; }
   const left=PROMO.filter(p=>!p.ok); $('promo-left').innerHTML=left.length?`<div class="sub" style="margin-top:8px;color:#b45309">아직 띠를 못 올린 아이 ${left.length}명: ${left.map(p=>esc(p.n)+(p.why?' ('+esc(p.why)+')':'')).join(', ')} <button class="btn" style="width:auto;padding:6px 10px" onclick="runPromo(true)">다시 시도</button></div>`:''; }
 function todayK(){ const d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
-function passTkd(n){
-  if(PASS[n]&&PASS[n].day===todayK()){ toast(`${n}은(는) 오늘 이미 합격 처리했어요`); return; }
-  PASS[n]={day:todayK(),res:'합격 처리 중'}; atSet('jd2_pass_v1',PASS);
-  PROMO.push({n,at:Date.now(),ok:false}); atSet('jd2_promo_v1',PROMO); runPromo();
+function passTkd(n,mode){ mode=mode||'tkd';
+  if(PASS[n]&&PASS[n].day===todayK()&&PASS[n].mode===mode){ toast(`${n}은(는) 오늘 이미 합격 처리했어요`); return; }
+  PASS[n]={day:todayK(),res:'합격 처리 중',mode}; atSet('jd2_pass_v1',PASS);
+  PROMO.push({n,mode,sid:SID[n]||'',at:Date.now(),ok:false}); atSet('jd2_promo_v1',PROMO); runPromo();
 }
 let promoBusy=false;
 async function runPromo(manual){
   if(promoBusy) return; const todo=PROMO.filter(p=>!p.ok); if(!todo.length) return;
   promoBusy=true;
   try{
-    if(!await atReady()){ todo.forEach(p=>{p.why='출결 앱 연결 필요';PASS[p.n]={day:todayK(),res:'합격 · 출결 연결하면 띠 올라감',keep:1}}); if(manual) toast('먼저 출결 앱 연결을 해 주세요 (체크 화면 아래)'); return; }
+    if(!await atReady()){ todo.forEach(p=>{p.why='출결 앱 연결 필요';PASS[p.n]={day:todayK(),res:'합격 · 출결 연결하면 '+(p.mode==='jump'?'급':'띠')+' 올라감',keep:1,mode:p.mode}}); if(manual) toast('먼저 출결 앱 연결을 해 주세요 (체크 화면 아래)'); return; }
     const snap=await AT.fs.getDocs(AT.fs.collection(AT.db,'students')); const all=[]; snap.forEach(d=>all.push({id:d.id,...d.data()}));
     for(const p of todo){
-      const nm=plainName(p.n); let c=all.filter(x=>String(x.name||'').trim()===nm&&x.status!=='LEFT');
+      const nm=plainName(p.n); let c=p.sid?all.filter(x=>x.id===p.sid):[];if(!c.length)c=all.filter(x=>String(x.name||'').trim()===nm&&x.status!=='LEFT');
       if(!c.length){ p.why='출결 앱에 이름이 없어요'; continue; }
       if(c.length>1){ const t=c.map((x,i)=>`${i+1}) ${x.name} · ${x.grade||''} · ${normBelt(x.belt)||'띠 없음'}`).join('\n'); const k=+prompt(`${p.n} 이름이 ${c.length}명이에요. 몇 번인가요?\n${t}`); if(!(k>=1&&k<=c.length)){ p.why='같은 이름이 여러 명'; continue; } c=[c[k-1]]; }
-      const s=c[0], cur=normBelt(s.belt);
+      const s=c[0];
+      if(p.mode==='jump'){
+        const cur=String(s.jumpGrade||'').trim();
+        if(cur==='1급'||/주니어/.test(cur)){ p.ok=true; p.res=`줄넘기 ${cur} 그대로 (주니어 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'jump'}; continue; }
+        const i=cur?JUMPS.indexOf(cur):-1; if(cur&&i<0){ p.why='급 이름을 모르겠어요: '+cur; continue; }
+        const nx=cur?JUMPS[i+1]:'9급';
+        await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{jumpGrade:nx,jumpAt:Date.now(),lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:cur||'없음',to:nx}},{merge:true});
+        p.ok=true; p.res=`줄넘기 합격 ${cur||'처음'} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'jump'}; toast(`${p.n} ${p.res}`); continue;
+      }
+      const cur=normBelt(s.belt);
       if(!cur){ p.why='띠가 비어 있어요'; continue; }
-      if(KEEP(cur)){ p.ok=true; p.res=`${cur} 그대로 (국기원 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1}; continue; }
+      if(KEEP(cur)){ p.ok=true; p.res=`${cur} 그대로 (국기원 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'tkd'}; continue; }
       const i=BELTS.indexOf(cur); if(i<0){ p.why='띠 이름을 모르겠어요: '+cur; continue; }
       const nx=BELTS[Math.min(BELTS.length-1,i+1)];
       await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{belt:nx,beltManual:true,beltAt:Date.now(),lastPass:{kind:'태권도 영상심사',at:Date.now(),from:cur,to:nx}},{merge:true});
-      p.ok=true; p.res=`합격 ${cur} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res}; toast(`${p.n} 합격! ${cur} → ${nx}`);
+      p.ok=true; p.res=`합격 ${cur} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'tkd'}; toast(`${p.n} 합격! ${cur} → ${nx}`);
     }
   }catch(e){ toast('띠 올리기 실패: '+(e.code||e.message)+' · 나중에 다시 시도해요'); }
   finally{ PROMO=PROMO.filter(p=>!p.ok||Date.now()-p.at<864e5*3); atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); promoBusy=false; try{ renderAtt(); if(S.view==='shoot') renderShoot(); }catch(e){} }
@@ -483,11 +517,11 @@ function renderShoot(){
   const pend=list.filter(n=>!S.done.includes(n)).sort(byRoster);
   const done=list.filter(n=>S.done.includes(n)).sort(byRoster);
   $('shoot-sub').innerHTML=window.Android
-    ?`<b>${MODE_N[S.mode]||''} 심사</b> · 이름을 누르면 촬영 화면이 열려요. 다 찍고 <b>[완료 · 저장]</b>을 눌러야 저장돼요${S.mode==='tkd'?' (저장 = 합격, 띠 한 단계 올라감)':''}. 중간에 취소하면 저장 안 돼요.`
+    ?`<b>${MODE_N[S.mode]||''} 심사</b> · 이름을 누르면 촬영 화면이 열려요. 다 찍고 <b>[완료 · 저장]</b>을 눌러야 저장돼요${S.mode==='tkd'?' (저장 = 합격, 띠 한 단계 올라감)':S.mode==='jump'?' (저장 = 합격, 줄넘기 급 한 단계 올라감)':''}. 중간에 취소하면 저장 안 돼요.`
     :'이름을 누르면 카메라가 열려요. 촬영 후 확인을 누르면 <b>이름_날짜시각.mp4</b>로 저장돼요.';
   $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
   $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
-  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?'':beltTag(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
   let html='';
   if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
   else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';
@@ -588,7 +622,7 @@ $('cam').addEventListener('change',async e=>{
     markDone(cur);
   }catch(err){ toast('저장 실패: '+(err.message||err)); }
 });
-window.onNativeSaved=(n,rep)=>{ if(S.mode==='tkd') setTimeout(()=>passTkd(n),300); if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
+window.onNativeSaved=(n,rep)=>{ if(S.mode) setTimeout(()=>passTkd(n,S.mode),300); if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
 window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
 
 if(window.showDirectoryPicker && !window.Android){
@@ -938,6 +972,7 @@ window.onUpdateProgress=p=>{
 };
 function toast(m){ const t=$('toast'); t.textContent=m; t.style.opacity=1; clearTimeout(toast._t); toast._t=setTimeout(()=>t.style.opacity=0,2600); }
 render();
+setTimeout(()=>{ try{ if(atGet('jd2_att',null)){ rosterSync(); runPromo(); } }catch(e){} },800);
 </script>
 </body>
 </html>
