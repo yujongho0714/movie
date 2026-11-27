@@ -46,7 +46,10 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.audio.ChannelMixingAudioProcessor;
 import androidx.media3.common.audio.ChannelMixingMatrix;
+import androidx.media3.common.Effect;
 import androidx.media3.effect.BitmapOverlay;
+import androidx.media3.effect.Crop;
+import androidx.media3.effect.Presentation;
 import androidx.media3.effect.OverlayEffect;
 import androidx.media3.effect.OverlaySettings;
 import androidx.media3.effect.TextureOverlay;
@@ -118,6 +121,7 @@ public class MainActivity extends Activity {
     // 날짜를 넣어서 저장하는 작업 줄 (한 번에 하나씩)
     private static class Job {
         Uri src; File temp; String name; long dateMs; String id; boolean replace;
+        float[] crop;   // 여러 명 같이 찍기: 이 아이 칸 (0~1, 왼쪽·위·오른쪽·아래)
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
     private boolean working = false;
@@ -341,12 +345,24 @@ public class MainActivity extends Activity {
             });
         }
 
+        /* 여러 명(2~4명) 같이 찍기 · 칸마다 따로 저장 */
+        @JavascriptInterface
+        public void recordGroup(final String namesJson) {
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    prefs.edit().putBoolean("replace", false).putString("names", namesJson).apply();
+                    startRecord("여러 명");
+                }
+            });
+        }
+
         @JavascriptInterface
         public void record2(final String name, final boolean replace) {
             main.post(new Runnable() {
                 @Override
                 public void run() {
-                    prefs.edit().putBoolean("replace", replace).apply();
+                    prefs.edit().putBoolean("replace", replace).remove("names").apply();
                     startRecord(name);
                 }
             });
@@ -915,6 +931,7 @@ public class MainActivity extends Activity {
             i.putExtra(RecordActivity.EX_PATH, f.getAbsolutePath());
             i.putExtra(RecordActivity.EX_NAME, name);
             i.putExtra(RecordActivity.EX_MODE, cfg().getString("mode", "tkd"));
+            if (prefs.getString("names", null) != null) i.putExtra(RecordActivity.EX_NAMES, prefs.getString("names", null));
             JSONObject sg = selectedSong();
             if (sg != null) { i.putExtra(RecordActivity.EX_SONG, sg.optString("uri")); i.putExtra(RecordActivity.EX_SONGNAME, sg.optString("name")); }
             prefs.edit().putString("path", f.getAbsolutePath()).putString("name", name)
@@ -972,6 +989,7 @@ public class MainActivity extends Activity {
         final String name = prefs.getString("name", "");
         long at = prefs.getLong("at", System.currentTimeMillis());
         boolean replace = prefs.getBoolean("replace", false);
+        String namesJson = prefs.getString("names", null);
         prefs.edit().clear().apply();
         if (path == null) return;
         final File f = new File(path);
@@ -999,6 +1017,26 @@ public class MainActivity extends Activity {
             if (resultCode != RESULT_CANCELED) toast("촬영 파일이 만들어지지 않았어요 (코드 " + resultCode + ")");
             return;
         }
+        // 여러 명 같이 찍기 → 칸마다 잘라서 아이별로 따로 저장 (원본 임시 파일은 마지막 아이 저장 후 지움)
+        try {
+            String rj = data != null ? data.getStringExtra(RecordActivity.EX_RECTS) : null;
+            if (namesJson != null && rj != null) {
+                JSONArray ns = new JSONArray(namesJson), rs = new JSONArray(rj);
+                int n = Math.min(ns.length(), rs.length());
+                if (n > 1) {
+                    for (int k = 0; k < n; k++) {
+                        JSONArray q = rs.getJSONArray(k);
+                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src;
+                        g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
+                        g.temp = k == n - 1 ? j.temp : null;
+                        jobs.add(g);
+                    }
+                    toast("저장 중... " + n + "명 칸마다 나눠서 저장해요");
+                    nextJob();
+                    return;
+                }
+            }
+        } catch (Exception e) { toast("칸 나누기 실패 → 한 영상으로 저장해요: " + e.getMessage()); }
         toast("저장 중... (날짜 표시 넣는 중)");
         jobs.add(j);
         nextJob();
@@ -1070,7 +1108,19 @@ public class MainActivity extends Activity {
             try { r.release(); } catch (Exception ignored) {}
         }
         int dispH = (rot % 180 == 0) ? h : w;
+        int dispW = (rot % 180 == 0) ? w : h;
         int bitrate = br > 0 ? Math.max(4_000_000, Math.min(40_000_000, br)) : 12_000_000;
+        ImmutableList.Builder<Effect> fx = ImmutableList.builder();
+        if (j.crop != null) {
+            // 이 아이 칸만 잘라내기 (Crop 좌표: -1~1, 위가 +1)
+            float x0 = clamp01(j.crop[0]), y0 = clamp01(j.crop[1]), x1 = clamp01(j.crop[2]), y1 = clamp01(j.crop[3]);
+            if (x1 - x0 < 0.05f || y1 - y0 < 0.05f) throw new IllegalArgumentException("칸이 너무 작아요");
+            fx.add(new Crop(x0 * 2 - 1, x1 * 2 - 1, 1 - y1 * 2, 1 - y0 * 2));
+            int cw = Math.max(2, Math.round(dispW * (x1 - x0) / 2f) * 2), ch = Math.max(2, Math.round(dispH * (y1 - y0) / 2f) * 2);
+            fx.add(Presentation.createForWidthAndHeight(cw, ch, Presentation.LAYOUT_SCALE_TO_FIT));
+            bitrate = Math.max(4_000_000, (int) (bitrate * Math.max(0.35f, (x1 - x0) * (y1 - y0))));
+            dispH = ch;
+        }
 
         String date = new SimpleDateFormat("yyyy년 MM월 dd일", Locale.KOREA).format(new Date(j.dateMs));
         Bitmap stamp = stampBitmap(date, dispH);
@@ -1079,8 +1129,9 @@ public class MainActivity extends Activity {
                 .setOverlayFrameAnchor(1f, 1f)
                 .build();
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
+        fx.add(new OverlayEffect(overlays));
         EditedMediaItem item = new EditedMediaItem.Builder(MediaItem.fromUri(j.src))
-                .setEffects(new Effects(ImmutableList.of(), ImmutableList.of(new OverlayEffect(overlays))))
+                .setEffects(new Effects(ImmutableList.of(), fx.build()))
                 .build();
 
         File dir = new File(getCacheDir(), "videos");
@@ -1114,12 +1165,14 @@ public class MainActivity extends Activity {
                     @Override
                     public void onError(Composition composition, ExportResult exportResult, ExportException e) {
                         out.delete();
-                        plainSave(j, "날짜 표시를 못 넣었어요");
+                        plainSave(j, j.crop != null ? j.name + " 칸 자르기를 못 했어요" : "날짜 표시를 못 넣었어요");
                     }
                 })
                 .build();
         t.start(item, out.getAbsolutePath());
     }
+
+    private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
 
     private Bitmap stampBitmap(String text, int frameH) {
         float size = Math.max(22f, frameH * 0.042f);

@@ -44,6 +44,9 @@ input[type=search],input[type=text],select{width:100%;background:var(--soft);bor
 .row.on{border-color:var(--accent)}
 .row.on .chk{background:var(--accent);border-color:var(--accent)}
 .row.done{opacity:.5}
+.seg{display:flex;gap:6px;margin:10px 0 4px}.seg button{flex:1;border:1px solid var(--line);background:var(--soft);color:var(--sub);border-radius:10px;padding:10px 6px;font-weight:800;font-size:13.5px}.seg button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.gsel{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}.gs{color:#fff;font-weight:800;font-size:13px;border-radius:6px;padding:5px 9px}.gs.c0,.gn.c0{background:#E24850}.gs.c1,.gn.c1{background:#3A8FE0}.gs.c2,.gn.c2{background:#38B75C}.gs.c3,.gn.c3{background:#C9901A}
+.gn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:#fff;font-weight:900;font-size:13px}.gn.off{background:transparent;border:2px solid var(--line)}.row.gon{border-color:var(--accent)}
 .tag{font-size:11px;font-weight:700;color:var(--danger);border:1px solid var(--danger);border-radius:999px;padding:2px 7px}
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:26px 10px}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;font-size:13px;line-height:1.5}
@@ -212,6 +215,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <div id="dirbox"></div>
     <div id="prog-text" style="font-weight:800;font-size:14px"></div>
     <div class="prog"><i id="prog-bar"></i></div>
+    <div id="grpbar"></div>
     <div class="list" id="shoot-list"></div>
   </section>
 
@@ -547,17 +551,34 @@ function renderShoot(){
     :'이름을 누르면 카메라가 열려요. 촬영 후 확인을 누르면 <b>이름_날짜시각.mp4</b>로 저장돼요.';
   $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
   $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
-  const row=(n,d)=>`<div class="row ${d?'done':''}" data-n="${enc(n)}"><span>${d?'✅':'🎥'}</span><span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?'':beltTag(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  const gi=n=>GSEL.indexOf(n);
+  const row=(n,d)=>`<div class="row ${d?'done':''} ${GRP&&gi(n)>=0?'gon':''}" data-n="${enc(n)}">${GRP?`<span class="gn ${gi(n)>=0?'c'+gi(n):'off'}">${gi(n)>=0?gi(n)+1:''}</span>`:`<span>${d?'✅':'🎥'}</span>`}<span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?'':beltTag(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${GRP?(gi(n)>=0?'빼기':'고르기'):d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
   let html='';
   if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
   else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';
   if(done.length) html+=`<div class="grade">촬영 완료 ${done.length}명</div>`+done.map(n=>row(n,true)).join('');
   $('shoot-list').innerHTML=html;
+  renderGrp();
 }
+/* 여러 명 같이 찍기 (2~4명): 고른 순서 = 왼쪽부터 서는 순서 = 촬영 화면 칸 순서. 저장할 때 칸마다 따로 잘라서 아이별로 저장 */
+var GRP=false, GSEL=[];
+function renderGrp(){ const el=$('grpbar'); if(!el) return;
+  if(!(window.Android&&Android.recordGroup)){ el.innerHTML=''; return; }
+  GSEL=GSEL.filter(n=>S.checked.includes(n));
+  el.innerHTML=`<div class="seg"><button class="${GRP?'':'on'}" onclick="setGrp(false)">한 명씩 찍기</button><button class="${GRP?'on':''}" onclick="setGrp(true)">여러 명 같이 (2~4명)</button></div>`+
+    (GRP?`<div class="box" style="margin-top:6px"><b style="margin:0">${GSEL.length?'서는 순서 (화면 왼쪽부터)':'같이 찍을 아이를 서는 순서대로 눌러 주세요'}</b>
+      <div class="gsel">${GSEL.map((n,i)=>`<span class="gs c${i}">${i+1}  ${esc(n)}</span>`).join('')}</div>
+      <div class="sub" style="margin:6px 0 0">촬영 화면에 아이마다 칸이 생기고 칸 위에 이름이 떠요. 칸은 끌어서 옮기고 모서리 점으로 크기를 바꿔요. [완료 · 저장]을 누르면 칸마다 따로 잘라서 아이 이름으로 저장돼요.</div>
+      <button class="btn primary" ${GSEL.length<2?'disabled':''} onclick="goGrp()">${GSEL.length<2?'2명 이상 골라 주세요':GSEL.length+'명 같이 촬영 ›'}</button>
+      ${GSEL.length?'<button class="btn" onclick="GSEL=[];renderShoot()">다시 고르기</button>':''}</div>`:'');
+}
+function setGrp(v){ GRP=v; if(!v) GSEL=[]; renderShoot(); }
+function goGrp(){ if(GSEL.length<2) return; Android.recordGroup(JSON.stringify(GSEL)); }
 $('shoot-list').addEventListener('click',e=>{
   const kb=e.target.closest('[data-kk]'); if(kb){ openMedia(dec(kb.dataset.kk)); return; }
   const r=e.target.closest('.row'); if(!r) return;
   cur=dec(r.dataset.n);
+  if(GRP){ const i=GSEL.indexOf(cur); if(i>=0) GSEL.splice(i,1); else if(GSEL.length>=4){ toast('한 번에 4명까지 같이 찍을 수 있어요'); return; } else GSEL.push(cur); renderShoot(); return; }
   if(window.Android){
     if(S.done.includes(cur)&&Android.record2){
       const rep=confirm(`${cur} 영상을 다시 찍어요.\n\n[확인] 방금 찍은 영상은 지우고 새로 찍기\n[취소] 그대로 두고 한 개 더 찍기`);
@@ -648,7 +669,7 @@ $('cam').addEventListener('change',async e=>{
     markDone(cur);
   }catch(err){ toast('저장 실패: '+(err.message||err)); }
 });
-window.onNativeSaved=(n,rep)=>{ if(S.mode) setTimeout(()=>passTkd(n,S.mode),300); if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
+window.onNativeSaved=(n,rep)=>{ GSEL=GSEL.filter(x=>x!==n); if(S.mode) setTimeout(()=>passTkd(n,S.mode),300); if(rep){ if(!S.done.includes(n)) S.done.push(n); logShot(n); save(); render(); toast(`${n} 영상을 새로 찍은 걸로 바꿨어요`); } else { markDone(n); toast(`${n} 앨범에 저장했어요`); } };
 window.onNativeCanceled=()=>toast('촬영이 취소됐어요');
 
 if(window.showDirectoryPicker && !window.Android){

@@ -12,7 +12,7 @@ android {
         targetSdk = 34
         // 깃허브 빌드 번호(= Releases 의 vN) 를 버전 번호로 → 앱이 새 버전인지 비교할 수 있게
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "7").toInt()
-        versionName = "1.6"
+        versionName = "1.7"
     }
 
     // 매번 같은 서명으로 만들어서 새 버전이 기존 앱 위에 바로 업데이트되게 함
