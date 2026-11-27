@@ -209,7 +209,10 @@ public class MainActivity extends Activity {
     }
 
     /** 앱을 켤 때 새 버전이 있는지 확인 → 있으면 '업데이트할까요?' */
+    private long lastUpdCheck = 0; private boolean updShown = false;
     private void checkUpdate() {
+        if (updShown) return;
+        lastUpdCheck = System.currentTimeMillis();
         lister.execute(new Runnable() {
             @Override public void run() {
                 try {
@@ -231,7 +234,8 @@ public class MainActivity extends Activity {
                     final String dl = url; final long ver = latest;
                     main.post(new Runnable() {
                         @Override public void run() {
-                            if (isFinishing()) return;
+                            if (isFinishing() || updShown) return;
+                            updShown = true;
                             new AlertDialog.Builder(MainActivity.this)
                                     .setTitle("새 버전 v" + ver + " 이 있어요")
                                     .setMessage("지금 업데이트할까요? (명단·촬영 기록은 그대로 남아요)")
@@ -239,6 +243,7 @@ public class MainActivity extends Activity {
                                         @Override public void onClick(DialogInterface d, int w) { downloadUpdate(dl); }
                                     })
                                     .setNegativeButton("나중에", null)
+                                    .setOnDismissListener(new DialogInterface.OnDismissListener() { @Override public void onDismiss(DialogInterface d) { updShown = false; } })
                                     .show();
                         }
                     });
@@ -320,6 +325,8 @@ public class MainActivity extends Activity {
             prefs.edit().remove("installAfterPerm").apply();
             installUpdate();
         }
+        // 앱을 끄지 않고 다시 열어도 새 버전을 확인해요 (10분에 한 번)
+        if (web != null && lastUpdCheck > 0 && System.currentTimeMillis() - lastUpdCheck > 10 * 60 * 1000) checkUpdate();
     }
 
     private void js(final String code) {
