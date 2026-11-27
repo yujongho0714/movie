@@ -224,75 +224,113 @@ public class RecordActivity extends ComponentActivity {
         else timer.setText("대기");
     }
 
-    /* ---------------- 이미 찍은 영상 가져오기: 장면 보면서 아이 칸 잡기 ---------------- */
-    private android.widget.ImageView frameView;
-    private long durMs = 0;
+    /* ---------------- 이미 찍은 영상 가져오기 ----------------
+       영상을 보면서 ① 아이마다 칸(1~4) 잡기 ② 줄넘기 시작한 곳에서 [시작점] · 끝난 곳에서 [끝점]
+       ③ [노래랑 같이 보기]로 노래가 맞는지 확인 → [완료 · 저장]하면 칸마다 잘라 아이별로 저장 (원래 소리는 빼고 노래만) */
+    private android.widget.VideoView vv;
+    private long durMs = 0, impStart = 0, impEnd = 0, trimS = 0;
+    private boolean previewing = false;
+    private TextView impInfo, playBtn;
+    private android.widget.SeekBar impSb;
+    private static String tfmt(long ms) { long s = ms / 1000; return (s / 60) + ":" + String.format(java.util.Locale.US, "%02d", s % 60) + "." + (ms % 1000) / 100; }
     private void buildImportUi(String mode) {
+        trimS = getIntent().getLongExtra("trimS", 0);
+        int vw = 16, vh = 9;
+        android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+        try { r.setDataSource(this, Uri.parse(importUri));
+            vw = Integer.parseInt(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
+            vh = Integer.parseInt(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            String ro = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            if (ro != null && (Integer.parseInt(ro) % 180) != 0) { int t = vw; vw = vh; vh = t; }
+            durMs = Long.parseLong(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
+        } catch (Exception ignored) {} finally { try { r.release(); } catch (Exception ignored) {} }
+        impEnd = durMs;
+
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
-        frameView = new android.widget.ImageView(this);
-        frameView.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-        root.addView(frameView, new FrameLayout.LayoutParams(-1, -1));
+        vv = new android.widget.VideoView(this);
+        root.addView(vv, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         grid = new Grid(this, names, null);
+        grid.aspect = vw / (float) Math.max(1, vh);
         root.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(12), dp(12), dp(12), dp(12));
         title = pill(("jump".equals(mode) ? "줄넘기 심사 · " : "태권도 심사 · ") + "가져온 영상 · " + names.length + "명", 0xCC14213D, 15);
         top.addView(title);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-        hint = pill("아이마다 칸을 맞춰 주세요 · 아래 막대로 장면을 넘겨 볼 수 있어요", 0x99000000, 13);
-        FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); hl.topMargin = dp(70);
+        hint = pill("① 칸 맞추기 ② 줄넘기 시작한 곳에서 [시작점] ③ [노래랑 같이 보기]로 확인", 0x99000000, 13);
+        FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); hl.topMargin = dp(66);
         root.addView(hint, hl);
         grid.onTouch = () -> hint.setVisibility(View.GONE);
 
         LinearLayout bot = new LinearLayout(this);
-        bot.setOrientation(LinearLayout.VERTICAL); bot.setPadding(dp(12), dp(8), dp(12), dp(18)); bot.setBackgroundColor(0xAA0B1020);
-        android.widget.SeekBar sb = new android.widget.SeekBar(this); sb.setMax(1000);
-        bot.addView(sb, new LinearLayout.LayoutParams(-1, dp(36)));
-        LinearLayout btns = new LinearLayout(this); btns.setGravity(Gravity.CENTER);
-        TextView ok = pill("완료 · 저장", 0xFF38B75C, 17), reset = pill("칸 다시 나누기", 0xFF55607A, 13), cancel = pill("취소", 0xFF55607A, 14);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(6), dp(6), dp(6), 0);
-        btns.addView(ok, lp); btns.addView(reset, lp); btns.addView(cancel, lp);
-        bot.addView(btns);
+        bot.setOrientation(LinearLayout.VERTICAL); bot.setPadding(dp(12), dp(6), dp(12), dp(16)); bot.setBackgroundColor(0xCC0B1020);
+        impInfo = new TextView(this); impInfo.setTextColor(Color.WHITE); impInfo.setTextSize(13); impInfo.setGravity(Gravity.CENTER);
+        bot.addView(impInfo);
+        impSb = new android.widget.SeekBar(this); impSb.setMax(1000);
+        bot.addView(impSb, new LinearLayout.LayoutParams(-1, dp(36)));
+        LinearLayout r1 = new LinearLayout(this); r1.setGravity(Gravity.CENTER);
+        TextView setS = pill("여기가 시작점", 0xFF3A8FE0, 14), setE = pill("여기가 끝점", 0xFF8B55E0, 14);
+        playBtn = pill(songUri != null ? "▶ 노래랑 같이 보기" : "▶ 시작점부터 보기", 0xFF55607A, 14);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(4), dp(4), dp(4), 0);
+        r1.addView(setS, lp); r1.addView(playBtn, lp); r1.addView(setE, lp);
+        bot.addView(r1);
+        LinearLayout r2 = new LinearLayout(this); r2.setGravity(Gravity.CENTER);
+        TextView ok = pill("완료 · " + names.length + "명 저장", 0xFF38B75C, 17), reset = pill("칸 다시 나누기", 0xFF55607A, 13), cancel = pill("취소", 0xFF55607A, 14);
+        r2.addView(ok, lp); r2.addView(reset, lp); r2.addView(cancel, lp);
+        bot.addView(r2);
         root.addView(bot, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         setContentView(root);
+        paintImp();
 
+        vv.setVideoURI(Uri.parse(importUri));
+        vv.setOnPreparedListener(mp -> {
+            mp.setVolume(0f, 0f);   // 원래 소리는 안 들려요 (저장할 때도 빼요)
+            if (durMs <= 0) { durMs = mp.getDuration(); impEnd = durMs; paintImp(); }
+            vv.start(); vv.postDelayed(() -> { if (!previewing) vv.pause(); }, 120);   // 첫 장면 보이게
+        });
+        vv.setOnCompletionListener(mp -> stopPreview());
+        impSb.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int pg, boolean u) { if (u && durMs > 0) { if (previewing) stopPreview(); vv.seekTo((int) (durMs * pg / 1000)); paintImp(); } }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) {}
+        });
+        setS.setOnClickListener(v -> { impStart = vv.getCurrentPosition(); if (impEnd <= impStart) impEnd = durMs; paintImp(); Toast.makeText(this, "시작점 " + tfmt(impStart), Toast.LENGTH_SHORT).show(); });
+        setE.setOnClickListener(v -> { long e = vv.getCurrentPosition(); if (e <= impStart + 1000) { Toast.makeText(this, "끝점은 시작점보다 뒤여야 해요", Toast.LENGTH_SHORT).show(); return; } impEnd = e; paintImp(); Toast.makeText(this, "끝점 " + tfmt(impEnd), Toast.LENGTH_SHORT).show(); });
+        playBtn.setOnClickListener(v -> { if (previewing) stopPreview(); else startPreview(); });
         ok.setOnClickListener(v -> {
-            setResult(RESULT_OK, new Intent().putExtra(EX_RECTS, grid.videoRects(false)));
+            stopPreview();
+            setResult(RESULT_OK, new Intent().putExtra(EX_RECTS, grid.videoRects(false)).putExtra("impStart", impStart).putExtra("impEnd", impEnd >= durMs - 200 ? 0 : impEnd));
             finish();
         });
         reset.setOnClickListener(v -> grid.reset());
-        cancel.setOnClickListener(v -> { setResult(RESULT_CANCELED); finish(); });
-        final java.util.concurrent.ExecutorService ex = java.util.concurrent.Executors.newSingleThreadExecutor();
-        final long[] want = {0};
-        sb.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(android.widget.SeekBar s, int p, boolean u) { if (u && durMs > 0) { want[0] = durMs * p / 1000; loadFrame(ex, want); } }
-            @Override public void onStartTrackingTouch(android.widget.SeekBar s) {}
-            @Override public void onStopTrackingTouch(android.widget.SeekBar s) {}
-        });
-        want[0] = -1; loadFrame(ex, want);
+        cancel.setOnClickListener(v -> { stopPreview(); setResult(RESULT_CANCELED); finish(); });
+        h.post(impTick);
     }
-    private boolean frameBusy = false;
-    private void loadFrame(java.util.concurrent.ExecutorService ex, long[] want) {
-        if (frameBusy) return; frameBusy = true;
-        final long at = want[0];
-        ex.execute(() -> {
-            android.graphics.Bitmap bm = null;
-            android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
-            try {
-                r.setDataSource(this, Uri.parse(importUri));
-                if (durMs == 0) { try { durMs = Long.parseLong(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)); } catch (Exception ignored) {} }
-                long t = at < 0 ? Math.min(1500, durMs / 3) : at;
-                bm = r.getScaledFrameAtTime(t * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1280, 1280);
-            } catch (Exception ignored) {} finally { try { r.release(); } catch (Exception ignored) {} }
-            final android.graphics.Bitmap f = bm;
-            h.post(() -> {
-                frameBusy = false;
-                if (f != null) { frameView.setImageBitmap(f); grid.aspect = f.getWidth() / (float) f.getHeight(); grid.invalidate(); }
-                else if (at < 0) Toast.makeText(this, "영상을 열 수 없어요", Toast.LENGTH_LONG).show();
-                if (want[0] != at && want[0] >= 0) loadFrame(ex, want);
-            });
-        });
+    private final Runnable impTick = new Runnable() { @Override public void run() {
+        if (vv == null) return;
+        if (previewing && impEnd > 0 && vv.getCurrentPosition() >= impEnd) stopPreview();
+        if (previewing && durMs > 0) impSb.setProgress((int) (vv.getCurrentPosition() * 1000L / durMs));
+        if (previewing) paintImp();
+        h.postDelayed(this, 150);
+    } };
+    private void paintImp() {
+        if (impInfo == null) return;
+        long cur = vv != null ? vv.getCurrentPosition() : 0;
+        impInfo.setText("지금 " + tfmt(cur) + "   ·   시작점 " + tfmt(impStart) + "  →  끝점 " + tfmt(impEnd) + "   (" + tfmt(Math.max(0, impEnd - impStart)) + ")"
+                + (songUri != null ? "\n시작점에 노래 " + tfmt(trimS) + " 부분이 붙어요 (전주 자른 곳)" : "\n노래 없이 저장돼요 (원래 소리는 빼요)"));
+    }
+    private void startPreview() {
+        previewing = true; playBtn.setText("■ 멈춤");
+        vv.seekTo((int) impStart); vv.start();
+        if (songUri != null) { songOn = true; prepSong(); if (player != null && prepared) { try { am.requestAudioFocus(focusReq); player.seekTo((int) trimS); player.start(); } catch (Exception ignored) {} } }
+    }
+    private void stopPreview() {
+        if (!previewing) return;
+        previewing = false; if (playBtn != null) playBtn.setText(songUri != null ? "▶ 노래랑 같이 보기" : "▶ 시작점부터 보기");
+        try { vv.pause(); } catch (Exception ignored) {}
+        if (player != null) { try { player.pause(); } catch (Exception ignored) {} }
+        paintImp();
     }
 
     /* ---------------- 카메라 ---------------- */
@@ -609,5 +647,5 @@ public class RecordActivity extends ComponentActivity {
     }
 
     @Override
-    protected void onDestroy() { super.onDestroy(); if (judge != null) judge.close(); anEx.shutdown(); stopSong(); h.removeCallbacksAndMessages(null); }
+    protected void onDestroy() { super.onDestroy(); vv = null; if (judge != null) judge.close(); anEx.shutdown(); stopSong(); h.removeCallbacksAndMessages(null); }
 }

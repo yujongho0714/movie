@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
         String song;    // 원래 소리를 끄면 이 노래만 들어가요
         long songOfs;   // 찍을 때 노래가 영상보다 늦게 시작한 시간(ms) → 저장할 때 영상 앞부분을 그만큼 잘라 맞춰요
         int miss = -1, jumps = 0;   // 줄넘기 실시간 판정 (걸린 횟수 · 뛴 횟수)
+        long vStart = -1, vEnd = 0; // 가져온 영상: 원장님이 고른 시작점 · 끝점 (ms)
         long[] missT, jumpT;        // 언제 걸렸는지 · 언제 뛰었는지 (영상 시작부터 ms) → 영상에 숫자로 넣어요
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
@@ -1140,6 +1141,8 @@ public class MainActivity extends Activity {
         i.putExtra(RecordActivity.EX_NAMES, prefs.getString("impNames", "[]"));
         i.putExtra(RecordActivity.EX_MODE, cfg().getString("mode", "tkd"));
         i.putExtra(RecordActivity.EX_PATH, new File(getCacheDir(), "unused.mp4").getAbsolutePath());
+        JSONObject sg = selectedSong();
+        if (sg != null) { i.putExtra(RecordActivity.EX_SONG, sg.optString("uri")); i.putExtra("trimS", trimOf(sg.optString("uri"))[0]); }
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivityForResult(i, REQ_IMPORT);
     }
@@ -1162,6 +1165,7 @@ public class MainActivity extends Activity {
             for (int k = 0; k < n; k++) {
                 JSONArray q = rs.getJSONArray(k);
                 Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.src = src; g.song = sg != null ? sg.optString("uri") : null; g.replace = cfg().getBoolean("impRep", false);
+                g.vStart = data.getLongExtra("impStart", 0); g.vEnd = data.getLongExtra("impEnd", 0);
                 g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                 if (n == 1 && g.crop[0] <= 0.005f && g.crop[1] <= 0.005f && g.crop[2] >= 0.995f && g.crop[3] >= 0.995f) g.crop = null;
                 jobs.add(g);
@@ -1355,17 +1359,20 @@ public class MainActivity extends Activity {
                 .setBackgroundFrameAnchor(0.96f, 0.95f)
                 .setOverlayFrameAnchor(1f, 1f)
                 .build();
-        final boolean mute = cfg().getBoolean("mute", true);
+        final boolean mute = j.vStart >= 0 || cfg().getBoolean("mute", true);   // 가져온 영상은 늘 원래 소리 빼요
         final boolean hasSong = j.song != null && !j.song.isEmpty();
         final boolean withSong = mute && hasSong;
         // 노래 맞추기: 자동으로 잰 시간 + 원장님이 정한 보정(설정) · 노래 0초 = 영상 ofs ms
-        long ofs = withSong ? j.songOfs + cfg().getLong("syncMs", 0) : hasSong ? j.songOfs : 0;
+        long ofs = withSong ? j.songOfs + (j.vStart >= 0 ? 0 : cfg().getLong("syncMs", 0)) : hasSong ? j.songOfs : 0;
         // 노래마다 앞 · 뒤 자르기 (전주 빼기): 노래 tr[0]초 ~ tr[1]초만 남겨요 → 같은 노래로 찍은 아이는 모두 똑같이
         long[] tr = hasSong ? trimOf(j.song) : new long[]{0, 0};
-        final long vClip = Math.max(0, ofs + tr[0]), sClip = Math.max(0, vClip - ofs);
-        final boolean cutEnd = tr[1] > tr[0];
+        if (j.vStart >= 0) ofs = j.vStart - tr[0];   // 가져온 영상: 원장님이 고른 시작점 = 노래(전주 자른 곳) 시작
+        final long vClip = j.vStart >= 0 && !hasSong ? j.vStart : Math.max(0, ofs + tr[0]), sClip = Math.max(0, vClip - ofs);
+        long endAt = tr[1] > tr[0] ? ofs + tr[1] : 0;
+        if (j.vEnd > 0) endAt = endAt > 0 ? Math.min(endAt, j.vEnd) : j.vEnd;
+        final boolean cutEnd = endAt > 0;
         MediaItem.ClippingConfiguration.Builder cb = new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(vClip);
-        if (cutEnd) cb.setEndPositionMs(Math.max(vClip + 1000, ofs + tr[1]));
+        if (cutEnd) cb.setEndPositionMs(Math.max(vClip + 1000, endAt));
         MediaItem vmi = (vClip > 0 || cutEnd) ? new MediaItem.Builder().setUri(j.src).setClippingConfiguration(cb.build()).build() : MediaItem.fromUri(j.src);
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
         if (j.missT != null && j.jumpT != null) {
