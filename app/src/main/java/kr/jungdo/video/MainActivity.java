@@ -56,6 +56,7 @@ import androidx.media3.effect.TextureOverlay;
 import androidx.media3.transformer.Composition;
 import androidx.media3.transformer.DefaultEncoderFactory;
 import androidx.media3.transformer.EditedMediaItem;
+import androidx.media3.transformer.EditedMediaItemSequence;
 import androidx.media3.transformer.Effects;
 import androidx.media3.transformer.ExportException;
 import androidx.media3.transformer.ExportResult;
@@ -97,6 +98,8 @@ public class MainActivity extends Activity {
     private static final int REQ_MEDIA = 3;
     private static final int REQ_FILE = 4;
     private static final int REQ_SONG = 5;
+    private static final int REQ_IMPORT_PICK = 6;
+    private static final int REQ_IMPORT = 7;
     private android.webkit.ValueCallback<Uri[]> fileCb;
     private static final String KAKAO = "com.kakao.talk";
 
@@ -122,6 +125,7 @@ public class MainActivity extends Activity {
     private static class Job {
         Uri src; File temp; String name; long dateMs; String id; boolean replace;
         float[] crop;   // 여러 명 같이 찍기: 이 아이 칸 (0~1, 왼쪽·위·오른쪽·아래)
+        String song;    // 원래 소리를 끄면 이 노래만 들어가요
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
     private boolean working = false;
@@ -343,6 +347,23 @@ public class MainActivity extends Activity {
                     startRecord(name);
                 }
             });
+        }
+
+        /* 원래 소리(선생님 목소리 등) 끄고 고른 노래만 넣기 */
+        @JavascriptInterface
+        public void setMute(boolean on) { cfg().edit().putBoolean("mute", on).apply(); }
+        @JavascriptInterface
+        public boolean getMute() { return cfg().getBoolean("mute", true); }
+
+        /* 이미 찍어 둔 영상 가져오기 → 아이 칸 잡기 → 아이별로 잘라서 저장 · 합격 처리 */
+        @JavascriptInterface
+        public void importExam(final String namesJson) {
+            main.post(new Runnable() { @Override public void run() {
+                prefs.edit().putString("impNames", namesJson).apply();
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("video/*");
+                try { startActivityForResult(i, REQ_IMPORT_PICK); } catch (Exception e) { toast("영상을 고를 수 없어요: " + e.getMessage()); }
+            } });
         }
 
         /* 여러 명(2~4명) 같이 찍기 · 칸마다 따로 저장 */
@@ -977,11 +998,54 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_VIDEO) onVideoResult(resultCode, data);
         else if (requestCode == REQ_PICK) onPickResult(resultCode, data);
         else if (requestCode == REQ_SONG) onSongResult(resultCode, data);
+        else if (requestCode == REQ_IMPORT_PICK) onImportPick(resultCode, data);
+        else if (requestCode == REQ_IMPORT) onImportResult(resultCode, data);
         else if (requestCode == REQ_FILE && fileCb != null) {
             Uri u = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
             fileCb.onReceiveValue(u != null ? new Uri[]{u} : null);
             fileCb = null;
         }
+    }
+
+    private void onImportPick(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) { web.evaluateJavascript("window.onNativeCanceled()", null); return; }
+        Uri u = data.getData();
+        try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+        prefs.edit().putString("impUri", u.toString()).apply();
+        Intent i = new Intent(this, RecordActivity.class);
+        i.putExtra(RecordActivity.EX_IMPORT, u.toString());
+        i.putExtra(RecordActivity.EX_NAMES, prefs.getString("impNames", "[]"));
+        i.putExtra(RecordActivity.EX_MODE, cfg().getString("mode", "tkd"));
+        i.putExtra(RecordActivity.EX_PATH, new File(getCacheDir(), "unused.mp4").getAbsolutePath());
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(i, REQ_IMPORT);
+    }
+
+    private void onImportResult(int resultCode, Intent data) {
+        String us = prefs.getString("impUri", null), nj = prefs.getString("impNames", "[]");
+        prefs.edit().remove("impUri").remove("impNames").apply();
+        if (resultCode != RESULT_OK || us == null || data == null) { web.evaluateJavascript("window.onNativeCanceled()", null); return; }
+        Uri src = Uri.parse(us);
+        long at = System.currentTimeMillis();
+        // 영상에 찍힌 날짜가 있으면 그 날짜로 표시
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try { r.setDataSource(this, src); String d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE);
+            if (d != null && d.length() >= 15) { SimpleDateFormat f = new SimpleDateFormat("yyyyMMdd'T'HHmmss", Locale.US); f.setTimeZone(java.util.TimeZone.getTimeZone("UTC")); Date dd = f.parse(d.substring(0, 15)); if (dd != null && dd.getTime() > 0) at = dd.getTime(); }
+        } catch (Exception ignored) {} finally { try { r.release(); } catch (Exception ignored) {} }
+        JSONObject sg = selectedSong();
+        try {
+            JSONArray ns = new JSONArray(nj), rs = new JSONArray(data.getStringExtra(RecordActivity.EX_RECTS));
+            int n = Math.min(ns.length(), rs.length());
+            for (int k = 0; k < n; k++) {
+                JSONArray q = rs.getJSONArray(k);
+                Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.src = src; g.song = sg != null ? sg.optString("uri") : null;
+                g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
+                if (n == 1 && g.crop[0] <= 0.005f && g.crop[1] <= 0.005f && g.crop[2] >= 0.995f && g.crop[3] >= 0.995f) g.crop = null;
+                jobs.add(g);
+            }
+            toast("저장 중... " + n + "명" + (n > 1 ? " 칸마다 나눠서" : "") + " 저장해요");
+            nextJob();
+        } catch (Exception e) { toast("가져오기 실패: " + e.getMessage()); }
     }
 
     private void onVideoResult(int resultCode, Intent data) {
@@ -998,6 +1062,7 @@ public class MainActivity extends Activity {
         j.name = name;
         j.dateMs = at;
         j.replace = replace;
+        if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; }
         if (resultCode != RESULT_OK) {
             // 촬영 도중 멈추거나 뒤로 가기/취소 → 저장하지 않음
             f.delete();
@@ -1026,7 +1091,7 @@ public class MainActivity extends Activity {
                 if (n > 1) {
                     for (int k = 0; k < n; k++) {
                         JSONArray q = rs.getJSONArray(k);
-                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src;
+                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song;
                         g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                         g.temp = k == n - 1 ? j.temp : null;
                         jobs.add(g);
@@ -1130,9 +1195,18 @@ public class MainActivity extends Activity {
                 .build();
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
         fx.add(new OverlayEffect(overlays));
+        final boolean mute = cfg().getBoolean("mute", true);
         EditedMediaItem item = new EditedMediaItem.Builder(MediaItem.fromUri(j.src))
+                .setRemoveAudio(mute)
                 .setEffects(new Effects(ImmutableList.of(), fx.build()))
                 .build();
+        Composition comp;
+        if (mute && j.song != null && !j.song.isEmpty()) {
+            // 원래 소리는 빼고 고른 노래만 (영상보다 짧으면 반복, 길면 영상 끝에서 끊겨요)
+            String su = j.song.startsWith("asset:") ? "asset:///" + j.song.substring(6) : j.song;
+            EditedMediaItem song = new EditedMediaItem.Builder(MediaItem.fromUri(su)).setRemoveVideo(true).build();
+            comp = new Composition.Builder(new EditedMediaItemSequence(item), new EditedMediaItemSequence(ImmutableList.of(song), true)).build();
+        } else comp = new Composition.Builder(new EditedMediaItemSequence(item)).build();
 
         File dir = new File(getCacheDir(), "videos");
         if (!dir.exists()) dir.mkdirs();
@@ -1169,7 +1243,7 @@ public class MainActivity extends Activity {
                     }
                 })
                 .build();
-        t.start(item, out.getAbsolutePath());
+        t.start(comp, out.getAbsolutePath());
     }
 
     private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }

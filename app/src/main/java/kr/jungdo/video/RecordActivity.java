@@ -61,7 +61,7 @@ import java.io.File;
 import java.util.Locale;
 
 public class RecordActivity extends ComponentActivity {
-    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects";
+    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects", EX_IMPORT = "import";
 
     private PreviewView preview;
     private TextView title, timer, songBtn, recBtn, flipBtn, hint;
@@ -78,6 +78,7 @@ public class RecordActivity extends ComponentActivity {
     private long startMs;
     private String[] names = new String[0];
     private Grid grid;
+    private String importUri;
     private final Handler h = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -98,7 +99,13 @@ public class RecordActivity extends ComponentActivity {
         songName = it.getStringExtra(EX_SONGNAME);
         am = (AudioManager) getSystemService(AUDIO_SERVICE);
         try { JSONArray a = new JSONArray(it.getStringExtra(EX_NAMES) == null ? "[]" : it.getStringExtra(EX_NAMES));
-            if (a.length() > 1) { names = new String[Math.min(4, a.length())]; for (int k = 0; k < names.length; k++) names[k] = a.getString(k); } } catch (Exception ignored) {}
+            importUri = it.getStringExtra(EX_IMPORT);
+            if (a.length() > (importUri != null ? 0 : 1)) { names = new String[Math.min(4, a.length())]; for (int k = 0; k < names.length; k++) names[k] = a.getString(k); } } catch (Exception ignored) {}
+        if (importUri != null) {
+            buildImportUi(it.getStringExtra(EX_MODE));
+            getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) { @Override public void handleOnBackPressed() { setResult(RESULT_CANCELED); finish(); } });
+            return;
+        }
         buildUi(it.getStringExtra(EX_NAME), it.getStringExtra(EX_MODE));
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { askCancel(); }
@@ -201,6 +208,77 @@ public class RecordActivity extends ComponentActivity {
         else timer.setText("대기");
     }
 
+    /* ---------------- 이미 찍은 영상 가져오기: 장면 보면서 아이 칸 잡기 ---------------- */
+    private android.widget.ImageView frameView;
+    private long durMs = 0;
+    private void buildImportUi(String mode) {
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
+        frameView = new android.widget.ImageView(this);
+        frameView.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        root.addView(frameView, new FrameLayout.LayoutParams(-1, -1));
+        grid = new Grid(this, names, null);
+        root.addView(grid, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(12), dp(12), dp(12), dp(12));
+        title = pill(("jump".equals(mode) ? "줄넘기 심사 · " : "태권도 심사 · ") + "가져온 영상 · " + names.length + "명", 0xCC14213D, 15);
+        top.addView(title);
+        root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        hint = pill("아이마다 칸을 맞춰 주세요 · 아래 막대로 장면을 넘겨 볼 수 있어요", 0x99000000, 13);
+        FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); hl.topMargin = dp(70);
+        root.addView(hint, hl);
+        grid.onTouch = () -> hint.setVisibility(View.GONE);
+
+        LinearLayout bot = new LinearLayout(this);
+        bot.setOrientation(LinearLayout.VERTICAL); bot.setPadding(dp(12), dp(8), dp(12), dp(18)); bot.setBackgroundColor(0xAA0B1020);
+        android.widget.SeekBar sb = new android.widget.SeekBar(this); sb.setMax(1000);
+        bot.addView(sb, new LinearLayout.LayoutParams(-1, dp(36)));
+        LinearLayout btns = new LinearLayout(this); btns.setGravity(Gravity.CENTER);
+        TextView ok = pill("완료 · 저장", 0xFF38B75C, 17), reset = pill("칸 다시 나누기", 0xFF55607A, 13), cancel = pill("취소", 0xFF55607A, 14);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(6), dp(6), dp(6), 0);
+        btns.addView(ok, lp); btns.addView(reset, lp); btns.addView(cancel, lp);
+        bot.addView(btns);
+        root.addView(bot, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        setContentView(root);
+
+        ok.setOnClickListener(v -> {
+            setResult(RESULT_OK, new Intent().putExtra(EX_RECTS, grid.videoRects(false)));
+            finish();
+        });
+        reset.setOnClickListener(v -> grid.reset());
+        cancel.setOnClickListener(v -> { setResult(RESULT_CANCELED); finish(); });
+        final java.util.concurrent.ExecutorService ex = java.util.concurrent.Executors.newSingleThreadExecutor();
+        final long[] want = {0};
+        sb.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar s, int p, boolean u) { if (u && durMs > 0) { want[0] = durMs * p / 1000; loadFrame(ex, want); } }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar s) {}
+            @Override public void onStopTrackingTouch(android.widget.SeekBar s) {}
+        });
+        want[0] = -1; loadFrame(ex, want);
+    }
+    private boolean frameBusy = false;
+    private void loadFrame(java.util.concurrent.ExecutorService ex, long[] want) {
+        if (frameBusy) return; frameBusy = true;
+        final long at = want[0];
+        ex.execute(() -> {
+            android.graphics.Bitmap bm = null;
+            android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+            try {
+                r.setDataSource(this, Uri.parse(importUri));
+                if (durMs == 0) { try { durMs = Long.parseLong(r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)); } catch (Exception ignored) {} }
+                long t = at < 0 ? Math.min(1500, durMs / 3) : at;
+                bm = r.getScaledFrameAtTime(t * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1280, 1280);
+            } catch (Exception ignored) {} finally { try { r.release(); } catch (Exception ignored) {} }
+            final android.graphics.Bitmap f = bm;
+            h.post(() -> {
+                frameBusy = false;
+                if (f != null) { frameView.setImageBitmap(f); grid.aspect = f.getWidth() / (float) f.getHeight(); grid.invalidate(); }
+                else if (at < 0) Toast.makeText(this, "영상을 열 수 없어요", Toast.LENGTH_LONG).show();
+                if (want[0] != at && want[0] >= 0) loadFrame(ex, want);
+            });
+        });
+    }
+
     /* ---------------- 카메라 ---------------- */
     private void startCamera() {
         final ListenableFuture<ProcessCameraProvider> f = ProcessCameraProvider.getInstance(this);
@@ -301,7 +379,7 @@ public class RecordActivity extends ComponentActivity {
     private void deleteOut() { if (out != null && out.exists()) out.delete(); }
     private void finishOk() {
         if (!hasClip) return;
-        Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath());
+        Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath()).putExtra(EX_SONG, songUri != null && songOn ? songUri : "");
         if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString(gridKey(), grid.save()).apply(); }
         setResult(RESULT_OK, r);
         finish();
@@ -341,6 +419,7 @@ public class RecordActivity extends ComponentActivity {
     public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
         // 폰을 돌리면 화면도 같이 돌고, 카메라를 다시 연결해서 영상 방향을 맞춰요 (칸은 가로·세로 따로 기억)
+        if (importUri != null) { if (grid != null) grid.invalidate(); return; }
         if (recording == null && !hasClip) {
             startCamera();
             if (grid != null) { if (!grid.load(gridPrefs().getString(gridKey(), null))) grid.reset(); }
@@ -354,7 +433,7 @@ public class RecordActivity extends ComponentActivity {
     static class Grid extends View {
         static final int[] COL = {0xFFE24850, 0xFF3A8FE0, 0xFF38B75C, 0xFFF2B233};
         final String[] names; final float[][] r; final RectF box = new RectF(); final float d;
-        float top = 0.10f, bot = 0.80f;
+        float top = 0.10f, bot = 0.80f, aspect = 0;   // aspect: 가져온 영상 가로/세로 (0이면 카메라 16:9)
         boolean locked = false; int drag = -1, mode = 0; float lx, ly;
         Runnable onTouch;
         final Paint st = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tx = new Paint(Paint.ANTI_ALIAS_FLAG), shade = new Paint();
@@ -369,7 +448,9 @@ public class RecordActivity extends ComponentActivity {
         void reset() {
             int n = names.length; float g = 0.012f, w = (1f - g * (n + 1)) / n;
             for (int i = 0; i < n; i++) { r[i][0] = g + i * (w + g); r[i][1] = r[i][0] + w; }
-            top = 0.10f; bot = 0.80f; invalidate();
+            top = 0.10f; bot = 0.80f;
+            if (n == 1) { r[0][0] = 0f; r[0][1] = 1f; top = 0f; bot = 1f; }
+            invalidate();
         }
         boolean load(String s) {
             if (s == null) return false;
@@ -388,7 +469,7 @@ public class RecordActivity extends ComponentActivity {
         }
         private void calc() {
             float vw = getWidth(), vh = getHeight(); if (vw <= 0 || vh <= 0) return;
-            float ar = vw < vh ? 9f / 16f : 16f / 9f, cw, ch;
+            float ar = aspect > 0 ? aspect : vw < vh ? 9f / 16f : 16f / 9f, cw, ch;
             if (vw / vh > ar) { ch = vh; cw = vh * ar; } else { cw = vw; ch = vw / ar; }
             box.set((vw - cw) / 2, (vh - ch) / 2, (vw + cw) / 2, (vh + ch) / 2);
         }

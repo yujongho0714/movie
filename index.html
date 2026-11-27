@@ -47,6 +47,7 @@ input[type=search],input[type=text],select{width:100%;background:var(--soft);bor
 .seg{display:flex;gap:6px;margin:10px 0 4px}.seg button{flex:1;border:1px solid var(--line);background:var(--soft);color:var(--sub);border-radius:10px;padding:10px 6px;font-weight:800;font-size:13.5px}.seg button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .gsel{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}.gs{color:#fff;font-weight:800;font-size:13px;border-radius:6px;padding:5px 9px}.gs.c0,.gn.c0{background:#E24850}.gs.c1,.gn.c1{background:#3A8FE0}.gs.c2,.gn.c2{background:#38B75C}.gs.c3,.gn.c3{background:#C9901A}
 .gn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:#fff;font-weight:900;font-size:13px}.gn.off{background:transparent;border:2px solid var(--line)}.row.gon{border-color:var(--accent)}
+.mute{border:0!important;padding:0!important;background:none!important;display:flex!important;gap:8px;align-items:flex-start;margin:10px 0 2px;font-size:13px;font-weight:600;line-height:1.45}.mute span{flex:1}.mute b{display:inline!important;margin:0!important;font-size:inherit!important}.mute input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent)}
 .tag{font-size:11px;font-weight:700;color:var(--danger);border:1px solid var(--danger);border-radius:999px;padding:2px 7px}
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:26px 10px}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;font-size:13px;line-height:1.5}
@@ -409,9 +410,11 @@ function renderSongs(){
   if(!(window.Android&&Android.songs)){ b.style.display='none'; return; }
   const L=songsList(), sel=Android.songSel(); const cur=L.find(x=>x.id===sel);
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div class="sub" style="margin:0">${MODE_N[S.mode]||''} 심사 · 지금 노래</div><div class="nowsong">${cur?esc(cur.name):'노래 없이 찍기'}</div></div><button class="btn" style="width:auto;margin:0;padding:9px 12px" onclick="Android.addSongs()">+ 노래 추가</button></div>
+  <label class="mute"><input type="checkbox" id="muteChk" ${Android.getMute&&Android.getMute()?'checked':''} onchange="setMute(this.checked)"><span>원래 소리(목소리 · 주변 소리) 끄고 <b>고른 노래만</b> 넣어서 저장</span></label>
   <div class="songs"><button class="${!cur?'on':''}" onclick="pickSong('')">노래 없이</button>${L.map(x=>`<button class="${cur&&cur.id===x.id?'on':''}" onclick="pickSong('${x.id}')">${esc(x.name)}</button>`).join('')}</div>
   <details style="margin-top:8px"><summary style="font-size:12.5px">노래 이름 바꾸기 · 빼기</summary>${L.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="text" value="${esc(x.name)}" data-sid="${x.id}" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="renameSong('${x.id}')">저장</button><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="delSong('${x.id}')">빼기</button></div>`).join('')}<div class="sub" style="margin-top:6px">예: '노랑띠 품새', '줄넘기 3급' 처럼 이름을 붙여 두면 고르기 쉬워요.</div></details>`;
 }
+function setMute(v){ if(Android.setMute) Android.setMute(!!v); toast(v?'저장할 때 원래 소리는 빼고 노래만 넣어요':'원래 소리 그대로 저장해요'); }
 function pickSong(id){ Android.selectSong(id); renderSongs(); const L=songsList(),c=L.find(x=>x.id===id); toast(c?`이제부터 '${c.name}' 노래로 찍어요`:'노래 없이 찍어요'); }
 function renameSong(id){ const el=document.querySelector(`[data-sid="${id}"]`); const v=(el&&el.value||'').trim(); if(!v) return; Android.renameSong(id,v); renderSongs(); toast('이름을 바꿨어요'); }
 function delSong(id){ if(!confirm('이 노래를 목록에서 뺄까요? (폰에 있는 원래 파일은 그대로예요)')) return; Android.delSong(id); renderSongs(); }
@@ -565,14 +568,22 @@ var GRP=false, GSEL=[];
 function renderGrp(){ const el=$('grpbar'); if(!el) return;
   if(!(window.Android&&Android.recordGroup)){ el.innerHTML=''; return; }
   GSEL=GSEL.filter(n=>S.checked.includes(n));
-  el.innerHTML=`<div class="seg"><button class="${GRP?'':'on'}" onclick="setGrp(false)">한 명씩 찍기</button><button class="${GRP?'on':''}" onclick="setGrp(true)">여러 명 같이 (2~4명)</button></div>`+
+  el.innerHTML=`<div class="seg"><button class="${GRP?'':'on'}" onclick="setGrp(false)">한 명씩 찍기</button><button class="${GRP?'on':''}" onclick="setGrp(true)">여러 명 · 찍어 둔 영상</button></div>`+
     (GRP?`<div class="box" style="margin-top:6px"><b style="margin:0">${GSEL.length?'서는 순서 (화면 왼쪽부터)':'같이 찍을 아이를 서는 순서대로 눌러 주세요'}</b>
       <div class="gsel">${GSEL.map((n,i)=>`<span class="gs c${i}">${i+1}  ${esc(n)}</span>`).join('')}</div>
       <div class="sub" style="margin:6px 0 0">촬영 화면에 아이마다 칸이 생기고 칸 위에 이름이 떠요. 칸은 끌어서 옮기고 모서리 점으로 크기를 바꿔요. [완료 · 저장]을 누르면 칸마다 따로 잘라서 아이 이름으로 저장돼요.</div>
-      <button class="btn primary" ${GSEL.length<2?'disabled':''} onclick="goGrp()">${GSEL.length<2?'2명 이상 골라 주세요':GSEL.length+'명 같이 촬영 ›'}</button>
+      <div style="display:flex;gap:6px;margin-top:8px"><input type="text" id="gadd" list="gnames" placeholder="이름 입력해서 추가" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 12px" onclick="gAdd()">추가</button></div>
+      <datalist id="gnames">${allNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+      <button class="btn primary" ${GSEL.length<2?'disabled':''} onclick="goGrp()">${GSEL.length<2?'같이 촬영은 2명 이상 골라 주세요':GSEL.length+'명 같이 촬영 ›'}</button>
+      ${Android.importExam?`<button class="btn" ${GSEL.length<1?'disabled':''} onclick="goImp()">${GSEL.length<1?'찍어 둔 영상: 영상 속 아이를 먼저 골라 주세요':'찍어 둔 영상 가져와서 '+GSEL.length+'명 심사 처리 ›'}</button>`:''}
       ${GSEL.length?'<button class="btn" onclick="GSEL=[];renderShoot()">다시 고르기</button>':''}</div>`:'');
 }
 function setGrp(v){ GRP=v; if(!v) GSEL=[]; renderShoot(); }
+function gAdd(){ const el=$('gadd'); const v=(el&&el.value||'').trim(); if(!v) return;
+  const n=allNames().find(x=>x===v)||allNames().find(x=>x.replace(/\(.*\)$/,'')===v); if(!n){ toast('명단에 없는 이름이에요'); return; }
+  if(GSEL.includes(n)) return; if(GSEL.length>=4){ toast('한 번에 4명까지예요'); return; }
+  if(!S.checked.includes(n)){ S.checked.push(n); save(); } GSEL.push(n); renderShoot(); }
+function goImp(){ if(!GSEL.length) return; Android.importExam(JSON.stringify(GSEL)); }
 function goGrp(){ if(GSEL.length<2) return; Android.recordGroup(JSON.stringify(GSEL)); }
 $('shoot-list').addEventListener('click',e=>{
   const kb=e.target.closest('[data-kk]'); if(kb){ openMedia(dec(kb.dataset.kk)); return; }
