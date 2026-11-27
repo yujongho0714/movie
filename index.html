@@ -161,6 +161,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <h1>🥋 ① 출석 체크</h1>
     <div class="sub">먼저 심사 종류를 고르고, 이번 타임에 온 아이들을 눌러 체크하세요.</div>
     <div class="mode" id="modebox"></div>
+    <div id="pendbox2"></div>
     <div id="unshot-entry"></div>
     <div id="missed-banner"></div>
     <div id="sort-entry"></div>
@@ -207,6 +208,7 @@ summary{color:var(--sub);font-size:13px;cursor:pointer}
     <h1>🎥 ② 영상촬영</h1>
     <div class="sub" id="shoot-sub"></div>
     <div class="box" id="songbox"></div>
+    <div id="pendbox"></div>
     <div id="dirbox"></div>
     <div id="prog-text" style="font-weight:800;font-size:14px"></div>
     <div class="prog"><i id="prog-bar"></i></div>
@@ -463,16 +465,35 @@ async function atSave(){
   catch(e){ $('at-msg').textContent='연결 실패: '+(e.code||e.message); }
 }
 function renderAtt(){ const c=atGet('jd2_att',null); if(!rosterUnsub) $('attst').textContent=c?'· 연결됨':'· 안 됨'; if(c){ $('at-code').value=c.code; $('at-email').value=c.email; }
-  const left=PROMO.filter(p=>!p.ok); $('promo-left').innerHTML=left.length?`<div class="sub" style="margin-top:8px;color:#b45309">아직 띠를 못 올린 아이 ${left.length}명: ${left.map(p=>esc(p.n)+(p.why?' ('+esc(p.why)+')':'')).join(', ')} <button class="btn" style="width:auto;padding:6px 10px" onclick="runPromo(true)">다시 시도</button></div>`:''; }
+  renderPend();
+  const left=PROMO.filter(p=>!p.ok&&!p.need); $('promo-left').innerHTML=left.length?`<div class="sub" style="margin-top:8px;color:#b45309">아직 띠를 못 올린 아이 ${left.length}명: ${left.map(p=>esc(p.n)+(p.why?' ('+esc(p.why)+')':'')).join(', ')} <button class="btn" style="width:auto;padding:6px 10px" onclick="runPromo(true)">다시 시도</button></div>`:''; }
 function todayK(){ const d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
 function passTkd(n,mode){ mode=mode||'tkd';
   if(PASS[n]&&PASS[n].day===todayK()&&PASS[n].mode===mode){ toast(`${n}은(는) 오늘 이미 합격 처리했어요`); return; }
   PASS[n]={day:todayK(),res:'합격 처리 중',mode}; atSet('jd2_pass_v1',PASS);
   PROMO.push({n,mode,sid:SID[n]||'',at:Date.now(),ok:false}); atSet('jd2_promo_v1',PROMO); runPromo();
 }
+/* 급 · 띠가 비어 있던 아이: 원장님이 넣은 값 그대로 */
+function renderPend(){
+  const L=PROMO.map((p,i)=>[p,i]).filter(([p])=>!p.ok&&p.need);
+  const html=L.length?`<div class="box" style="border-color:#f59e0b"><b style="margin:0">급 · 띠를 넣어 주세요 ${L.length}명</b><div class="sub" style="margin:4px 0 8px">합격했는데 출결 앱에 급(띠)이 비어 있던 아이예요. 넣은 값 그대로 저장돼요.</div>`+
+    L.map(([p,i])=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><span style="flex:1;font-weight:800">${esc(p.n)} <small style="color:var(--sub)">${p.need==='jump'?'줄넘기':'태권도'}</small></span>`+
+      (p.need==='jump'?`<input type="number" min="1" max="9" inputmode="numeric" placeholder="급" id="pg${i}" style="width:70px;margin:0"><span>급</span>`:`<select id="pg${i}" style="width:120px;margin:0">${BELTS.map(b=>`<option>${b}</option>`).join('')}<option>1품 1급</option><option>2품 1급</option><option>3품 1급</option></select>`)+
+      `<button class="btn primary" style="width:auto;margin:0;padding:8px 12px" onclick="setPend(${i})">저장</button></div>`).join('')+'</div>':'';
+  ['pendbox','pendbox2'].forEach(id=>{const el=$(id);if(el)el.innerHTML=html});
+}
+async function setPend(i){
+  const p=PROMO[i]; if(!p) return; const el=$('pg'+i); let v=(el&&el.value||'').trim(); if(!v) return toast('값을 넣어 주세요');
+  if(p.need==='jump'){ const n=+v; if(!(n>=1&&n<=9)) return toast('1~9 사이 숫자를 넣어 주세요'); v=n+'급'; }
+  try{ if(!await atReady()) return toast('먼저 출결 앱 연결을 해 주세요');
+    await AT.fs.setDoc(AT.fs.doc(AT.db,'students',p.sid),p.need==='jump'?{jumpGrade:v,jumpAt:Date.now()}:{belt:v,beltManual:true,beltAt:Date.now()},{merge:true});
+    p.ok=true; p.res=(p.need==='jump'?'줄넘기 ':'')+v+' (직접 넣음)'; PASS[p.n]={day:todayK(),res:p.res,mode:p.mode}; delete p.need;
+    atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); toast(`${p.n} ${p.res}`); renderAtt(); if(S.view==='shoot') renderShoot();
+  }catch(e){ toast('저장 실패: '+(e.code||e.message)); }
+}
 let promoBusy=false;
 async function runPromo(manual){
-  if(promoBusy) return; const todo=PROMO.filter(p=>!p.ok); if(!todo.length) return;
+  if(promoBusy) return; const todo=PROMO.filter(p=>!p.ok&&!p.need); if(!todo.length){ try{renderPend()}catch(e){} return; }
   promoBusy=true;
   try{
     if(!await atReady()){ todo.forEach(p=>{p.why='출결 앱 연결 필요';PASS[p.n]={day:todayK(),res:'합격 · 출결 연결하면 '+(p.mode==='jump'?'급':'띠')+' 올라감',keep:1,mode:p.mode}}); if(manual) toast('먼저 출결 앱 연결을 해 주세요 (체크 화면 아래)'); return; }
@@ -485,13 +506,14 @@ async function runPromo(manual){
       if(p.mode==='jump'){
         const cur=String(s.jumpGrade||'').trim();
         if(cur==='1급'||/주니어/.test(cur)){ p.ok=true; p.res=`줄넘기 ${cur} 그대로 (주니어 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'jump'}; continue; }
-        const i=cur?JUMPS.indexOf(cur):-1; if(cur&&i<0){ p.why='급 이름을 모르겠어요: '+cur; continue; }
-        const nx=cur?JUMPS[i+1]:'9급';
+        if(!cur){ p.why='줄넘기 급 미지정'; p.need='jump'; p.sid=s.id; PASS[p.n]={day:todayK(),res:'합격 · 급 미지정 (숫자 넣어 주세요)',keep:1,mode:'jump'}; continue; }
+        const i=JUMPS.indexOf(cur); if(i<0){ p.why='급 이름을 모르겠어요: '+cur; continue; }
+        const nx=JUMPS[i+1];
         await AT.fs.setDoc(AT.fs.doc(AT.db,'students',s.id),{jumpGrade:nx,jumpAt:Date.now(),lastPass:{kind:'줄넘기 영상심사',at:Date.now(),from:cur||'없음',to:nx}},{merge:true});
         p.ok=true; p.res=`줄넘기 합격 ${cur||'처음'} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'jump'}; toast(`${p.n} ${p.res}`); continue;
       }
       const cur=normBelt(s.belt);
-      if(!cur){ p.why='띠가 비어 있어요'; continue; }
+      if(!cur){ p.why='띠 미지정'; p.need='tkd'; p.sid=s.id; PASS[p.n]={day:todayK(),res:'합격 · 띠 미지정 (골라 주세요)',keep:1,mode:'tkd'}; continue; }
       if(KEEP(cur)){ p.ok=true; p.res=`${cur} 그대로 (국기원 심사)`; PASS[p.n]={day:todayK(),res:p.res,keep:1,mode:'tkd'}; continue; }
       const i=BELTS.indexOf(cur); if(i<0){ p.why='띠 이름을 모르겠어요: '+cur; continue; }
       const nx=BELTS[Math.min(BELTS.length-1,i+1)];
@@ -499,7 +521,7 @@ async function runPromo(manual){
       p.ok=true; p.res=`합격 ${cur} → ${nx}`; PASS[p.n]={day:todayK(),res:p.res,mode:'tkd'}; toast(`${p.n} 합격! ${cur} → ${nx}`);
     }
   }catch(e){ toast('띠 올리기 실패: '+(e.code||e.message)+' · 나중에 다시 시도해요'); }
-  finally{ PROMO=PROMO.filter(p=>!p.ok||Date.now()-p.at<864e5*3); atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); promoBusy=false; try{ renderAtt(); if(S.view==='shoot') renderShoot(); }catch(e){} }
+  finally{ PROMO=PROMO.filter(p=>!p.ok||Date.now()-p.at<864e5*3);try{renderPend()}catch(e){} atSet('jd2_promo_v1',PROMO); atSet('jd2_pass_v1',PASS); promoBusy=false; try{ renderAtt(); if(S.view==='shoot') renderShoot(); }catch(e){} }
 }
 
 function startShoot(){
