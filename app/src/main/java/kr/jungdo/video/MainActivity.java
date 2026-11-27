@@ -126,6 +126,7 @@ public class MainActivity extends Activity {
         Uri src; File temp; String name; long dateMs; String id; boolean replace;
         float[] crop;   // 여러 명 같이 찍기: 이 아이 칸 (0~1, 왼쪽·위·오른쪽·아래)
         String song;    // 원래 소리를 끄면 이 노래만 들어가요
+        long songOfs;   // 찍을 때 노래가 영상보다 늦게 시작한 시간(ms) → 저장할 때 영상 앞부분을 그만큼 잘라 맞춰요
         int miss = -1, jumps = 0;   // 줄넘기 실시간 판정 (걸린 횟수 · 뛴 횟수)
         long[] missT, jumpT;        // 언제 걸렸는지 · 언제 뛰었는지 (영상 시작부터 ms) → 영상에 숫자로 넣어요
     }
@@ -363,6 +364,11 @@ public class MainActivity extends Activity {
         public void setMute(boolean on) { cfg().edit().putBoolean("mute", on).apply(); }
         @JavascriptInterface
         public boolean getMute() { return cfg().getBoolean("mute", true); }
+        /* 노래 맞추기 보정 (ms): +면 노래를 더 늦게, -면 더 일찍 */
+        @JavascriptInterface
+        public void setSync(int ms) { cfg().edit().putLong("syncMs", Math.max(-3000, Math.min(3000, ms))).apply(); }
+        @JavascriptInterface
+        public int getSync() { return (int) cfg().getLong("syncMs", 0); }
         /* 줄넘기 실시간 판정 (걸린 횟수 세기) */
         @JavascriptInterface
         public void setJudge(boolean on) { cfg().edit().putBoolean("judge", on).apply(); }
@@ -1074,10 +1080,10 @@ public class MainActivity extends Activity {
 
     /** 줄넘기 판정 숫자: 영상 시간에 맞춰 "걸림 N · M개", 걸린 순간엔 1초 동안 빨갛게 */
     private class JudgeOverlay extends BitmapOverlay {
-        final long[] mt, jt; final int frameH; String key = ""; Bitmap bmp;
-        JudgeOverlay(long[] mt, long[] jt, int frameH) { this.mt = mt; this.jt = jt; this.frameH = frameH; }
+        final long[] mt, jt; final int frameH; final long add; String key = ""; Bitmap bmp;
+        JudgeOverlay(long[] mt, long[] jt, int frameH, long add) { this.mt = mt; this.jt = jt; this.frameH = frameH; this.add = add; }
         @Override public Bitmap getBitmap(long presentationTimeUs) {
-            long ms = presentationTimeUs / 1000; int m = 0, jn = 0; boolean flash = false;
+            long ms = presentationTimeUs / 1000 + add; int m = 0, jn = 0; boolean flash = false;
             for (long x : mt) if (x <= ms) { m++; if (ms - x < 1000) flash = true; }
             for (long x : jt) if (x <= ms) jn++;
             String k = m + "|" + jn + "|" + flash;
@@ -1112,7 +1118,7 @@ public class MainActivity extends Activity {
         j.name = name;
         j.dateMs = at;
         j.replace = replace;
-        if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; }
+        if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; j.songOfs = data.getLongExtra(RecordActivity.EX_SONGOFS, 0); }
         JSONArray missA = null;
         try { String ms = data != null ? data.getStringExtra(RecordActivity.EX_MISS) : null; if (ms != null) { missA = new JSONArray(ms); if (missA.length() > 0) setJudge(j, missA.getJSONArray(0));  } } catch (Exception ignored) {}
         if (resultCode != RESULT_OK) {
@@ -1143,7 +1149,7 @@ public class MainActivity extends Activity {
                 if (n > 1) {
                     for (int k = 0; k < n; k++) {
                         JSONArray q = rs.getJSONArray(k);
-                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song;
+                        Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song; g.songOfs = j.songOfs;
                         if (missA != null && k < missA.length()) setJudge(g, missA.getJSONArray(k));
                         g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                         g.temp = k == n - 1 ? j.temp : null;
@@ -1247,23 +1253,29 @@ public class MainActivity extends Activity {
                 .setBackgroundFrameAnchor(0.96f, 0.95f)
                 .setOverlayFrameAnchor(1f, 1f)
                 .build();
+        final boolean mute = cfg().getBoolean("mute", true);
+        final boolean withSong = mute && j.song != null && !j.song.isEmpty();
+        // 노래 맞추기: 자동으로 잰 시간 + 원장님이 정한 보정(설정) · +면 영상 앞을 자르고, -면 노래 앞을 잘라요
+        long ofs = withSong ? j.songOfs + cfg().getLong("syncMs", 0) : 0;
+        final long vClip = Math.max(0, ofs), sClip = Math.max(0, -ofs);
+        MediaItem vmi = vClip > 0 ? new MediaItem.Builder().setUri(j.src).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(vClip).build()).build() : MediaItem.fromUri(j.src);
         ImmutableList<TextureOverlay> overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os));
         if (j.missT != null && j.jumpT != null) {
             OverlaySettings js = new OverlaySettings.Builder().setBackgroundFrameAnchor(-0.94f, 0.95f).setOverlayFrameAnchor(-1f, 1f).build();
-            JudgeOverlay jo = new JudgeOverlay(j.missT, j.jumpT, dispH) { @Override public OverlaySettings getOverlaySettings(long t) { return js; } };
+            JudgeOverlay jo = new JudgeOverlay(j.missT, j.jumpT, dispH, vClip) { @Override public OverlaySettings getOverlaySettings(long t) { return js; } };
             overlays = ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(stamp, os), jo);
         }
         fx.add(new OverlayEffect(overlays));
-        final boolean mute = cfg().getBoolean("mute", true);
-        EditedMediaItem item = new EditedMediaItem.Builder(MediaItem.fromUri(j.src))
+        EditedMediaItem item = new EditedMediaItem.Builder(vmi)
                 .setRemoveAudio(mute)
                 .setEffects(new Effects(ImmutableList.of(), fx.build()))
                 .build();
         Composition comp;
-        if (mute && j.song != null && !j.song.isEmpty()) {
+        if (withSong) {
             // 원래 소리는 빼고 고른 노래만 (영상보다 짧으면 반복, 길면 영상 끝에서 끊겨요)
             String su = j.song.startsWith("asset:") ? "asset:///" + j.song.substring(6) : j.song;
-            EditedMediaItem song = new EditedMediaItem.Builder(MediaItem.fromUri(su)).setRemoveVideo(true).build();
+            MediaItem smi = sClip > 0 ? new MediaItem.Builder().setUri(su).setClippingConfiguration(new MediaItem.ClippingConfiguration.Builder().setStartPositionMs(sClip).build()).build() : MediaItem.fromUri(su);
+            EditedMediaItem song = new EditedMediaItem.Builder(smi).setRemoveVideo(true).build();
             comp = new Composition.Builder(new EditedMediaItemSequence(item), new EditedMediaItemSequence(ImmutableList.of(song), true)).build();
         } else comp = new Composition.Builder(new EditedMediaItemSequence(item)).build();
 

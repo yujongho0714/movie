@@ -62,7 +62,7 @@ import java.io.File;
 import java.util.Locale;
 
 public class RecordActivity extends ComponentActivity {
-    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects", EX_IMPORT = "import", EX_JUDGE = "judge", EX_MISS = "miss";
+    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects", EX_IMPORT = "import", EX_JUDGE = "judge", EX_MISS = "miss", EX_SONGOFS = "songOfs";
 
     private PreviewView preview;
     private TextView title, timer, songBtn, recBtn, flipBtn, hint;
@@ -330,6 +330,7 @@ public class RecordActivity extends ComponentActivity {
                     }
                 }
                 if (!bound) provider.bindToLifecycle(this, cs, pv, videoCapture);
+                h.post(this::prepSong);
             } catch (Exception e) {
                 Toast.makeText(this, "카메라를 열 수 없어요: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 cancelOut();
@@ -387,28 +388,47 @@ public class RecordActivity extends ComponentActivity {
     }
 
     /* ---------------- 노래 (블루투스 스피커로도 나가요) ---------------- */
-    private void startSong() {
-        if (songUri == null || !songOn) return;
+    /* 노래는 미리 준비해 두고 녹화가 시작되는 순간 바로 틀어요 · 실제로 틀어진 시각을 재서 저장할 때 영상과 맞춰요 */
+    private long songAt = 0;
+    private boolean prepared = false;
+    private void prepSong() {
+        if (songUri == null || !songOn || (player != null && prepared)) return;
         try {
             stopSong();
             player = new MediaPlayer();
             AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build();
             player.setAudioAttributes(aa);
             focusReq = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(aa).build();
-            am.requestAudioFocus(focusReq);
             if (songUri.startsWith("asset:")) {
                 android.content.res.AssetFileDescriptor fd = getAssets().openFd(songUri.substring(6));
                 player.setDataSource(fd.getFileDescriptor(), fd.getStartOffset(), fd.getLength());
                 fd.close();
             } else player.setDataSource(this, Uri.parse(songUri));
             player.setLooping(true);
-            player.setOnPreparedListener(MediaPlayer::start);
-            player.prepareAsync();
+            player.prepare();
+            prepared = true;
         } catch (Exception e) {
+            prepared = false;
             Toast.makeText(this, "노래를 틀 수 없어요: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
+    private void startSong() {
+        songAt = 0;
+        if (songUri == null || !songOn) return;
+        prepSong();
+        if (player == null || !prepared) return;
+        try { am.requestAudioFocus(focusReq); player.seekTo(0); player.start(); songAt = System.currentTimeMillis(); } catch (Exception ignored) {}
+    }
+    /** 노래가 영상보다 몇 ms 늦게 들렸는지 (틀기까지 걸린 시간 + 스피커 지연, 블루투스는 더 늦어요) */
+    private long songOffset() {
+        if (songAt <= 0 || startMs <= 0) return 0;
+        long lat = 60;
+        try { for (android.media.AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) { int t = d.getType();
+            if (t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == 26 /* BLE 스피커 */ || t == 27) { lat = 250; break; } } } catch (Exception ignored) {}
+        return Math.max(0, Math.min(3000, songAt - startMs + lat));
+    }
     private void stopSong() {
+        prepared = false;
         if (player != null) { try { player.stop(); } catch (Exception ignored) {} player.release(); player = null; }
         if (focusReq != null) { am.abandonAudioFocusRequest(focusReq); focusReq = null; }
     }
@@ -419,6 +439,7 @@ public class RecordActivity extends ComponentActivity {
         if (!hasClip) return;
         Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath()).putExtra(EX_SONG, songUri != null && songOn ? songUri : "");
         if (judge != null) r.putExtra(EX_MISS, judge.json());
+        r.putExtra(EX_SONGOFS, songOffset());
         if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString(gridKey(), grid.save()).apply(); }
         setResult(RESULT_OK, r);
         finish();
