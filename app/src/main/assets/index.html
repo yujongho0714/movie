@@ -410,11 +410,16 @@ function renderSongs(){
   if(!(window.Android&&Android.songs)){ b.style.display='none'; return; }
   const L=songsList(), sel=Android.songSel(); const cur=L.find(x=>x.id===sel);
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div class="sub" style="margin:0">${MODE_N[S.mode]||''} 심사 · 지금 노래</div><div class="nowsong">${cur?esc(cur.name):'노래 없이 찍기'}</div></div><button class="btn" style="width:auto;margin:0;padding:9px 12px" onclick="Android.addSongs()">+ 노래 추가</button></div>
-  <label class="mute"><input type="checkbox" id="muteChk" ${Android.getMute&&Android.getMute()?'checked':''} onchange="setMute(this.checked)"><span>원래 소리(목소리 · 주변 소리) 끄고 <b>고른 노래만</b> 넣어서 저장</span></label>
+  <label class="mute"><input type="checkbox" id="muteChk" ${Android.getMute&&Android.getMute()?'checked':''} onchange="setOrigMute(this.checked)"><span>원래 소리(목소리 · 주변 소리) 끄고 <b>고른 노래만</b> 넣어서 저장</span></label>
+  ${S.mode==='jump'&&Android.setJudge?`<label class="mute"><input type="checkbox" ${Android.getJudge&&Android.getJudge()?'checked':''} onchange="setJudge(this.checked)"><span><b>실시간 판정</b> · 찍는 동안 걸린 횟수와 뛴 횟수를 세요 (발이 멈추면 걸림 · 참고용)</span></label>`:''}
   <div class="songs"><button class="${!cur?'on':''}" onclick="pickSong('')">노래 없이</button>${L.map(x=>`<button class="${cur&&cur.id===x.id?'on':''}" onclick="pickSong('${x.id}')">${esc(x.name)}</button>`).join('')}</div>
   <details style="margin-top:8px"><summary style="font-size:12.5px">노래 이름 바꾸기 · 빼기</summary>${L.map(x=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="text" value="${esc(x.name)}" data-sid="${x.id}" style="flex:1;margin:0"><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="renameSong('${x.id}')">저장</button><button class="btn" style="width:auto;margin:0;padding:8px 10px" onclick="delSong('${x.id}')">빼기</button></div>`).join('')}<div class="sub" style="margin-top:6px">예: '노랑띠 품새', '줄넘기 3급' 처럼 이름을 붙여 두면 고르기 쉬워요.</div></details>`;
 }
-function setMute(v){ if(Android.setMute) Android.setMute(!!v); toast(v?'저장할 때 원래 소리는 빼고 노래만 넣어요':'원래 소리 그대로 저장해요'); }
+function setJudge(v){ if(Android.setJudge) Android.setJudge(!!v); toast(v?'찍는 동안 걸린 횟수를 세요':'실시간 판정을 껐어요'); }
+let JUDGE={}; try{ JUDGE=JSON.parse(localStorage.getItem('jd2_judge_v1')||'{}') }catch(e){}
+window.onJudge=(n,m,j)=>{ JUDGE[n]={day:todayK(),miss:m,jumps:j}; try{ localStorage.setItem('jd2_judge_v1',JSON.stringify(JUDGE)) }catch(e){} toast(`${n} 걸림 ${m}번 · ${j}개`); };
+const judgeTag=n=>{ const o=JUDGE[n]; return o&&o.day===todayK()?`<span class="tag" style="color:var(--accent);border-color:var(--accent)">걸림 ${o.miss} · ${o.jumps}개</span>`:''; };
+function setOrigMute(v){ if(Android.setMute) Android.setMute(!!v); toast(v?'저장할 때 원래 소리는 빼고 노래만 넣어요':'원래 소리 그대로 저장해요'); }
 function pickSong(id){ Android.selectSong(id); renderSongs(); const L=songsList(),c=L.find(x=>x.id===id); toast(c?`이제부터 '${c.name}' 노래로 찍어요`:'노래 없이 찍어요'); }
 function renameSong(id){ const el=document.querySelector(`[data-sid="${id}"]`); const v=(el&&el.value||'').trim(); if(!v) return; Android.renameSong(id,v); renderSongs(); toast('이름을 바꿨어요'); }
 function delSong(id){ if(!confirm('이 노래를 목록에서 뺄까요? (폰에 있는 원래 파일은 그대로예요)')) return; Android.delSong(id); renderSongs(); }
@@ -555,7 +560,7 @@ function renderShoot(){
   $('prog-text').textContent=`촬영 ${done.length} / ${list.length}명 완료`;
   $('prog-bar').style.width=(list.length?done.length/list.length*100:0)+'%';
   const gi=n=>GSEL.indexOf(n);
-  const row=(n,d)=>`<div class="row ${d?'done':''} ${GRP&&gi(n)>=0?'gon':''}" data-n="${enc(n)}">${GRP?`<span class="gn ${gi(n)>=0?'c'+gi(n):'off'}">${gi(n)>=0?gi(n)+1:''}</span>`:`<span>${d?'✅':'🎥'}</span>`}<span class="nm">${esc(n)}${PASS[n]&&PASS[n].day===todayK()?'':beltTag(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${GRP?(gi(n)>=0?'빼기':'고르기'):d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
+  const row=(n,d)=>`<div class="row ${d?'done':''} ${GRP&&gi(n)>=0?'gon':''}" data-n="${enc(n)}">${GRP?`<span class="gn ${gi(n)>=0?'c'+gi(n):'off'}">${gi(n)>=0?gi(n)+1:''}</span>`:`<span>${d?'✅':'🎥'}</span>`}<span class="nm">${esc(n)}${judgeTag(n)}${PASS[n]&&PASS[n].day===todayK()?'':beltTag(n)}${PASS[n]&&PASS[n].day===todayK()?`<span class="pass ${PASS[n].keep?'keep':''}">${esc(PASS[n].res)}</span>`:''}</span>${counts[n]?`<span class="cnt">✓${counts[n]}</span>`:''}${d&&window.Kakao?(sentToday(n)?`<button class="kk" data-kk="${enc(n)}" style="background:var(--soft);border-color:var(--ok);color:var(--ok)">✅ 보냄</button>`:`<button class="kk" data-kk="${enc(n)}">💬 카톡</button>`):''}<span class="go">${GRP?(gi(n)>=0?'빼기':'고르기'):d?'다시 촬영 ›':'촬영 ›'}</span></div>`;
   let html='';
   if(pend.length) html+=`<div class="grade">아직 안 찍음 ${pend.length}명</div>`+pend.map(n=>row(n,false)).join('');
   else html+='<div class="empty">🎉 모두 촬영했어요!<br>다음 타임 준비를 눌러주세요.</div>';

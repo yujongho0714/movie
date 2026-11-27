@@ -40,6 +40,7 @@ import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.video.FallbackStrategy;
@@ -61,7 +62,7 @@ import java.io.File;
 import java.util.Locale;
 
 public class RecordActivity extends ComponentActivity {
-    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects", EX_IMPORT = "import";
+    public static final String EX_PATH = "path", EX_NAME = "name", EX_MODE = "mode", EX_SONG = "song", EX_SONGNAME = "songName", EX_NAMES = "names", EX_RECTS = "rects", EX_IMPORT = "import", EX_JUDGE = "judge", EX_MISS = "miss";
 
     private PreviewView preview;
     private TextView title, timer, songBtn, recBtn, flipBtn, hint;
@@ -79,6 +80,9 @@ public class RecordActivity extends ComponentActivity {
     private String[] names = new String[0];
     private Grid grid;
     private String importUri;
+    private RopeJudge judge;
+    private TextView judgePill;
+    private final java.util.concurrent.ExecutorService anEx = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Handler h = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -105,6 +109,13 @@ public class RecordActivity extends ComponentActivity {
             buildImportUi(it.getStringExtra(EX_MODE));
             getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) { @Override public void handleOnBackPressed() { setResult(RESULT_CANCELED); finish(); } });
             return;
+        }
+        if (it.getBooleanExtra(EX_JUDGE, false)) {
+            final int kn = Math.max(1, names.length);
+            judge = new RopeJudge(kn, () -> grid != null ? grid.rectsArr(!back) : new float[][]{{0, 0, 1, 1}}, (m, j) -> {
+                if (grid != null) { for (int k = 0; k < kn && k < grid.extra.length; k++) grid.extra[k] = "걸림 " + m[k] + " · " + j[k] + "개"; grid.invalidate(); }
+                if (judgePill != null && grid == null) judgePill.setText("실시간 판정 · 걸림 " + m[0] + "번 · " + j[0] + "개");
+            });
         }
         buildUi(it.getStringExtra(EX_NAME), it.getStringExtra(EX_MODE));
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -161,6 +172,11 @@ public class RecordActivity extends ComponentActivity {
         hint = pill(names.length > 1 ? "폰을 가로로 돌려도 돼요 · 칸은 끌어서 옮기고 점으로 크기 조절 · 위아래는 모든 칸 같이" : "빨간 버튼을 누르면 녹화" + (songUri != null ? "와 노래가 같이 시작돼요" : "가 시작돼요"), 0x99000000, 13);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); hl.topMargin = dp(70);
         root.addView(hint, hl);
+        if (judge != null && grid == null) {
+            judgePill = pill("실시간 판정 · 녹화하면 걸린 횟수를 세요", 0xCC8B55E0, 15);
+            FrameLayout.LayoutParams jl = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL | Gravity.TOP); jl.topMargin = dp(118);
+            root.addView(judgePill, jl);
+        }
 
         LinearLayout bot = new LinearLayout(this);
         bot.setOrientation(LinearLayout.HORIZONTAL); bot.setGravity(Gravity.CENTER); bot.setPadding(dp(12), dp(12), dp(12), dp(22));
@@ -293,7 +309,27 @@ public class RecordActivity extends ComponentActivity {
                         .build();
                 videoCapture = VideoCapture.withOutput(rec);
                 CameraSelector cs = back ? CameraSelector.DEFAULT_BACK_CAMERA : CameraSelector.DEFAULT_FRONT_CAMERA;
-                provider.bindToLifecycle(this, cs, pv, videoCapture);
+                boolean bound = false;
+                if (judge != null) {
+                    try {
+                        ImageAnalysis an = new ImageAnalysis.Builder()
+                                .setResolutionSelector(new androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                                        .setAspectRatioStrategy(androidx.camera.core.resolutionselector.AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                                        .setResolutionStrategy(new androidx.camera.core.resolutionselector.ResolutionStrategy(new android.util.Size(1280, 720),
+                                                androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                                .build();
+                        an.setAnalyzer(anEx, judge);
+                        provider.bindToLifecycle(this, cs, pv, videoCapture, an);
+                        bound = true;
+                    } catch (Exception e2) {
+                        provider.unbindAll();
+                        Toast.makeText(this, "이 폰은 찍으면서 판정을 같이 못 해요 · 판정 없이 찍어요", Toast.LENGTH_LONG).show();
+                        judge = null; if (judgePill != null) judgePill.setVisibility(View.GONE);
+                    }
+                }
+                if (!bound) provider.bindToLifecycle(this, cs, pv, videoCapture);
             } catch (Exception e) {
                 Toast.makeText(this, "카메라를 열 수 없어요: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 cancelOut();
@@ -312,6 +348,7 @@ public class RecordActivity extends ComponentActivity {
                     .start(ContextCompat.getMainExecutor(this), ev -> {
                         if (ev instanceof VideoRecordEvent.Start) {
                             startMs = System.currentTimeMillis();
+                            if (judge != null) judge.start();
                             h.post(tick);
                             startSong();
                         } else if (ev instanceof VideoRecordEvent.Finalize) {
@@ -341,6 +378,7 @@ public class RecordActivity extends ComponentActivity {
     }
     private void stopRec() {
         if (recording != null) recording.stop();
+        if (judge != null) judge.stop();
         if (grid != null) { grid.locked = false; grid.invalidate(); }
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         recBtn.setText("녹화");
@@ -380,6 +418,7 @@ public class RecordActivity extends ComponentActivity {
     private void finishOk() {
         if (!hasClip) return;
         Intent r = new Intent().putExtra(EX_PATH, out.getAbsolutePath()).putExtra(EX_SONG, songUri != null && songOn ? songUri : "");
+        if (judge != null) r.putExtra(EX_MISS, judge.json());
         if (grid != null) { r.putExtra(EX_RECTS, grid.videoRects(!back)); gridPrefs().edit().putString(gridKey(), grid.save()).apply(); }
         setResult(RESULT_OK, r);
         finish();
@@ -436,10 +475,17 @@ public class RecordActivity extends ComponentActivity {
         float top = 0.10f, bot = 0.80f, aspect = 0;   // aspect: 가져온 영상 가로/세로 (0이면 카메라 16:9)
         boolean locked = false; int drag = -1, mode = 0; float lx, ly;
         Runnable onTouch;
+        String[] extra;
+        float[][] rectsArr(boolean mirror) {
+            float[][] o = new float[r.length][];
+            for (int i = 0; i < r.length; i++) { float x0 = mirror ? 1 - r[i][1] : r[i][0], x1 = mirror ? 1 - r[i][0] : r[i][1]; o[i] = new float[]{x0, top, x1, bot}; }
+            return o;
+        }
         final Paint st = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG), tx = new Paint(Paint.ANTI_ALIAS_FLAG), shade = new Paint();
         Grid(android.content.Context c, String[] names, String saved) {
             super(c); this.names = names; d = c.getResources().getDisplayMetrics().density;
             r = new float[names.length][2];
+            extra = new String[names.length];
             st.setStyle(Paint.Style.STROKE); st.setStrokeWidth(3 * d);
             tx.setColor(Color.WHITE); tx.setTypeface(Typeface.DEFAULT_BOLD);
             shade.setColor(0x55000000);
@@ -484,6 +530,13 @@ public class RecordActivity extends ComponentActivity {
                 st.setColor(col); c.drawRect(p, st);
                 // 이름: 칸 너비에 맞게 글자 크기를 줄여요
                 String t = (i + 1) + " " + names[i];
+                if (extra[i] != null) {   // 실시간 판정: 칸 아래쪽에 걸림 · 개수
+                    float es = 15 * d; tx.setTextSize(es);
+                    float ew = tx.measureText(extra[i]); while (ew > p.width() - 8 * d && es > 9 * d) { es -= d; tx.setTextSize(es); ew = tx.measureText(extra[i]); }
+                    float eh = es * 1.6f;
+                    fill.setColor(0xCC0B1020); c.drawRoundRect(new RectF(p.left + 2 * d, p.bottom - eh - 4 * d, p.left + ew + 12 * d, p.bottom - 4 * d), 5 * d, 5 * d, fill);
+                    c.drawText(extra[i], p.left + 7 * d, p.bottom - 4 * d - eh / 2 - (tx.descent() + tx.ascent()) / 2, tx);
+                }
                 float ts = 16 * d; tx.setTextSize(ts);
                 float maxW = p.width() - 10 * d;
                 while (tx.measureText(t) > maxW && ts > 10 * d) { ts -= d; tx.setTextSize(ts); }
@@ -527,5 +580,5 @@ public class RecordActivity extends ComponentActivity {
     }
 
     @Override
-    protected void onDestroy() { super.onDestroy(); stopSong(); h.removeCallbacksAndMessages(null); }
+    protected void onDestroy() { super.onDestroy(); if (judge != null) judge.close(); anEx.shutdown(); stopSong(); h.removeCallbacksAndMessages(null); }
 }

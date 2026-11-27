@@ -126,6 +126,7 @@ public class MainActivity extends Activity {
         Uri src; File temp; String name; long dateMs; String id; boolean replace;
         float[] crop;   // 여러 명 같이 찍기: 이 아이 칸 (0~1, 왼쪽·위·오른쪽·아래)
         String song;    // 원래 소리를 끄면 이 노래만 들어가요
+        int miss = -1, jumps = 0;   // 줄넘기 실시간 판정 (걸린 횟수 · 뛴 횟수)
     }
     private final ArrayDeque<Job> jobs = new ArrayDeque<>();
     private boolean working = false;
@@ -354,6 +355,11 @@ public class MainActivity extends Activity {
         public void setMute(boolean on) { cfg().edit().putBoolean("mute", on).apply(); }
         @JavascriptInterface
         public boolean getMute() { return cfg().getBoolean("mute", true); }
+        /* 줄넘기 실시간 판정 (걸린 횟수 세기) */
+        @JavascriptInterface
+        public void setJudge(boolean on) { cfg().edit().putBoolean("judge", on).apply(); }
+        @JavascriptInterface
+        public boolean getJudge() { return cfg().getBoolean("judge", false); }
 
         /* 이미 찍어 둔 영상 가져오기 → 아이 칸 잡기 → 아이별로 잘라서 저장 · 합격 처리 */
         @JavascriptInterface
@@ -953,6 +959,7 @@ public class MainActivity extends Activity {
             i.putExtra(RecordActivity.EX_NAME, name);
             i.putExtra(RecordActivity.EX_MODE, cfg().getString("mode", "tkd"));
             if (prefs.getString("names", null) != null) i.putExtra(RecordActivity.EX_NAMES, prefs.getString("names", null));
+            i.putExtra(RecordActivity.EX_JUDGE, "jump".equals(cfg().getString("mode", "tkd")) && cfg().getBoolean("judge", false));
             JSONObject sg = selectedSong();
             if (sg != null) { i.putExtra(RecordActivity.EX_SONG, sg.optString("uri")); i.putExtra(RecordActivity.EX_SONGNAME, sg.optString("name")); }
             prefs.edit().putString("path", f.getAbsolutePath()).putString("name", name)
@@ -1063,6 +1070,8 @@ public class MainActivity extends Activity {
         j.dateMs = at;
         j.replace = replace;
         if (data != null) { String sgu = data.getStringExtra(RecordActivity.EX_SONG); if (sgu != null && !sgu.isEmpty()) j.song = sgu; }
+        JSONArray missA = null;
+        try { String ms = data != null ? data.getStringExtra(RecordActivity.EX_MISS) : null; if (ms != null) { missA = new JSONArray(ms); if (missA.length() > 0) { j.miss = missA.getJSONArray(0).getInt(0); j.jumps = missA.getJSONArray(0).getInt(1); } } } catch (Exception ignored) {}
         if (resultCode != RESULT_OK) {
             // 촬영 도중 멈추거나 뒤로 가기/취소 → 저장하지 않음
             f.delete();
@@ -1092,6 +1101,7 @@ public class MainActivity extends Activity {
                     for (int k = 0; k < n; k++) {
                         JSONArray q = rs.getJSONArray(k);
                         Job g = new Job(); g.name = ns.getString(k); g.dateMs = at; g.replace = false; g.src = j.src; g.song = j.song;
+                        if (missA != null && k < missA.length()) { g.miss = missA.getJSONArray(k).getInt(0); g.jumps = missA.getJSONArray(k).getInt(1); }
                         g.crop = new float[]{(float) q.getDouble(0), (float) q.getDouble(1), (float) q.getDouble(2), (float) q.getDouble(3)};
                         g.temp = k == n - 1 ? j.temp : null;
                         jobs.add(g);
@@ -1133,6 +1143,7 @@ public class MainActivity extends Activity {
             public void run() {
                 if (j.temp != null) j.temp.delete();
                 if (j.id == null) {
+                    if (ok && j.miss >= 0) web.evaluateJavascript("window.onJudge&&window.onJudge(" + JSONObject.quote(j.name) + "," + j.miss + "," + j.jumps + ")", null);
                     if (ok) web.evaluateJavascript("window.onNativeSaved(" + JSONObject.quote(j.name) + "," + j.replace + ")", null);
                 } else {
                     web.evaluateJavascript("window.onSortSaved(" + JSONObject.quote(j.id) + "," + ok + "," + jobs.size() + ")", null);
