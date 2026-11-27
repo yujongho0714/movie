@@ -87,11 +87,14 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
                 Float ay = null; float sc = 0;
                 try {
                     Pose pose = Tasks.await(det[i].process(InputImage.fromBitmap(c, 0)));
-                    PoseLandmark la = pose.getPoseLandmark(PoseLandmark.LEFT_ANKLE), ra = pose.getPoseLandmark(PoseLandmark.RIGHT_ANKLE);
-                    PoseLandmark ls = pose.getPoseLandmark(PoseLandmark.LEFT_SHOULDER), rs = pose.getPoseLandmark(PoseLandmark.RIGHT_SHOULDER);
-                    if (la != null && ra != null && ls != null && rs != null && la.getInFrameLikelihood() > 0.5f && ra.getInFrameLikelihood() > 0.5f) {
-                        float ank = (la.getPosition().y + ra.getPosition().y) / 2f, sh = (ls.getPosition().y + rs.getPosition().y) / 2f;
-                        if (ank - sh > 10) { ay = ank; sc = ank - sh; }
+                    // 사람이 진짜 있을 때만: 코 · 어깨 · 골반 · 무릎 · 발목이 다 또렷하고, 위에서 아래로 순서가 맞고, 칸 높이의 35% 이상 크게 보여야 해요
+                    int[] K = {PoseLandmark.NOSE, PoseLandmark.LEFT_SHOULDER, PoseLandmark.RIGHT_SHOULDER, PoseLandmark.LEFT_HIP, PoseLandmark.RIGHT_HIP,
+                            PoseLandmark.LEFT_KNEE, PoseLandmark.RIGHT_KNEE, PoseLandmark.LEFT_ANKLE, PoseLandmark.RIGHT_ANKLE};
+                    float[] Y = new float[K.length]; boolean ok = true;
+                    for (int k = 0; k < K.length && ok; k++) { PoseLandmark l = pose.getPoseLandmark(K[k]); if (l == null || l.getInFrameLikelihood() < 0.8f) ok = false; else Y[k] = l.getPosition().y; }
+                    if (ok) {
+                        float nose = Y[0], sh = (Y[1] + Y[2]) / 2f, hip = (Y[3] + Y[4]) / 2f, knee = (Y[5] + Y[6]) / 2f, ank = (Y[7] + Y[8]) / 2f, body = ank - nose;
+                        if (nose < sh && sh < hip && hip < knee && knee < ank && body > h * 0.35f) { ay = (hip + ank) / 2f; sc = ank - sh; }   // 골반+발목: 몸 전체가 떠야 1개
                     }
                 } catch (Exception ignored) {}
                 synchronized (tr) { tr[i].feed(t, ay, sc); }
@@ -110,16 +113,20 @@ public class RopeJudge implements ImageAnalysis.Analyzer {
         float ext = Float.NaN, scale = 0;
         long lastJump = 0, firstRun = 0;
         final java.util.ArrayList<Long> missT = new java.util.ArrayList<>(), jumpT = new java.util.ArrayList<>();
-        static final float THR = 0.03f;       // 몸 길이의 3% 넘게 오르내리면 한 번 뜀
+        static final float THR = 0.04f;       // 몸 길이(어깨~발목)의 4% 넘게 몸 전체가 오르내리면 한 번 뜀
         static final long STOP_MS = 900;      // 뛰다가 이만큼 멈추면 걸림
 
+        int seen = 0; long lastSeen = 0;
         void feed(long t, Float y, float sc) {
-            if (y != null) {
+            if (y == null) { seen = 0; ext = Float.NaN; up = false; }      // 사람이 안 보이면 세던 걸 처음부터 (빈 화면에서 안 세요)
+            else if (++seen < 3) { lastSeen = t; ext = Float.NaN; }       // 3장 연속 또렷하게 보여야 세기 시작
+            else {
+                lastSeen = t;
                 scale = scale <= 0 ? sc : scale * 0.9f + sc * 0.1f;
                 float v = y / Math.max(1f, scale);
                 if (Float.isNaN(ext)) { ext = v; up = false; }
                 else if (!up) { if (v > ext) ext = v; else if (ext - v > THR) { up = true; ext = v; } }      // 화면 위쪽 = y 작음
-                else { if (v < ext) ext = v; else if (v - ext > THR) { up = false; ext = v; jump(t); } }
+                else { if (v < ext) ext = v; else if (v - ext > THR) { up = false; ext = v; if (t - lastJump > 180) jump(t); } }
             }
             if (active && t - lastJump > STOP_MS) { miss++; since = 0; missed = true; active = false; missT.add(lastJump + 300); }
         }
